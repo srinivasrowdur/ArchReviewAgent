@@ -13,6 +13,11 @@ import {
 import { generateResearchMemo } from './research/retrieval.js';
 import { type ResearchProgressUpdate } from '../shared/contracts.js';
 import { buildDecisionFromMemo } from './research/decisioning.js';
+import {
+  createResearchRunId,
+  describeError,
+  logResearchEvent
+} from './research/logging.js';
 import { presentDecision } from './research/presentation.js';
 type ResearchProgressListener = (update: ResearchProgressUpdate) => void;
 
@@ -49,13 +54,99 @@ async function runResearchWorkflow(
     throw new MissingOpenAIKeyError();
   }
 
-  const companyName = validateVendorInput(rawCompanyName);
+  const runId = createResearchRunId();
   const startedAt = Date.now();
   const budgetMs = getResearchTimeoutMs();
-  const resolution = await resolveVendorIdentity(companyName, startedAt, budgetMs);
-  const memo = await generateResearchMemo(resolution, startedAt, budgetMs, onProgress);
-  const decision = buildDecisionFromMemo(resolution.canonicalName, memo, resolution);
-  return presentDecision(decision);
+  let phase = 'intake';
+  let companyName = rawCompanyName.trim();
+  let resolution:
+    | Awaited<ReturnType<typeof resolveVendorIdentity>>
+    | undefined;
+  let memo = '';
+  let decision:
+    | ReturnType<typeof buildDecisionFromMemo>
+    | undefined;
+
+  try {
+    companyName = validateVendorInput(rawCompanyName);
+    logResearchEvent('research_started', {
+      runId,
+      companyName,
+      budgetMs,
+      streamed: Boolean(onProgress)
+    });
+
+    phase = 'resolution';
+    resolution = await resolveVendorIdentity(companyName, startedAt, budgetMs);
+    logResearchEvent('vendor_resolved', {
+      runId,
+      companyName,
+      canonicalName: resolution.canonicalName,
+      officialDomains: resolution.officialDomains,
+      resolutionConfidence: resolution.confidence,
+      alternatives: resolution.alternatives,
+      elapsedMs: Date.now() - startedAt
+    });
+
+    phase = 'retrieval';
+    memo = await generateResearchMemo(resolution, startedAt, budgetMs, onProgress);
+    logResearchEvent('memo_generated', {
+      runId,
+      canonicalName: resolution.canonicalName,
+      memoLength: memo.length,
+      hasPreliminaryVerdict: /preliminary verdict/i.test(memo),
+      hasEuSection: /eu data residency/i.test(memo),
+      hasDeploymentSection: /enterprise deployment/i.test(memo),
+      elapsedMs: Date.now() - startedAt
+    });
+
+    phase = 'decision';
+    decision = buildDecisionFromMemo(resolution.canonicalName, memo, resolution);
+    logResearchEvent('decision_built', {
+      runId,
+      canonicalName: decision.companyName,
+      recommendation: decision.recommendation,
+      euStatus: decision.guardrails.euDataResidency.status,
+      euConfidence: decision.guardrails.euDataResidency.confidence,
+      euEvidenceCount: decision.guardrails.euDataResidency.evidence.length,
+      deploymentStatus: decision.guardrails.enterpriseDeployment.status,
+      deploymentConfidence: decision.guardrails.enterpriseDeployment.confidence,
+      deploymentEvidenceCount: decision.guardrails.enterpriseDeployment.evidence.length,
+      unansweredQuestionCount: decision.unansweredQuestions.length,
+      preliminaryVerdictLength: decision.preliminaryVerdict.length,
+      elapsedMs: Date.now() - startedAt
+    });
+
+    phase = 'presentation';
+    const report = presentDecision(decision);
+    logResearchEvent('report_presented', {
+      runId,
+      canonicalName: report.companyName,
+      recommendation: report.recommendation,
+      euStatus: report.guardrails.euDataResidency.status,
+      deploymentStatus: report.guardrails.enterpriseDeployment.status,
+      unansweredQuestionCount: report.unansweredQuestions.length,
+      nextStepCount: report.nextSteps.length,
+      elapsedMs: Date.now() - startedAt
+    });
+
+    return report;
+  } catch (error) {
+    logResearchEvent('research_failed', {
+      runId,
+      phase,
+      companyName,
+      canonicalName: resolution?.canonicalName,
+      officialDomains: resolution?.officialDomains,
+      memoLength: memo.length,
+      decisionRecommendation: decision?.recommendation,
+      euStatus: decision?.guardrails.euDataResidency.status,
+      deploymentStatus: decision?.guardrails.enterpriseDeployment.status,
+      elapsedMs: Date.now() - startedAt,
+      ...describeError(error)
+    });
+    throw error;
+  }
 }
 
 export {
