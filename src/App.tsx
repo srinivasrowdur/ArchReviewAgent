@@ -13,6 +13,8 @@ import {
 
 const isTestMode =
   new URLSearchParams(window.location.search).get('mode') === 'test';
+const conversationStorageKey = `archreviewagent.conversations.${isTestMode ? 'test' : 'live'}`;
+const maxStoredConversations = 40;
 
 type Message = {
   id: string;
@@ -20,6 +22,23 @@ type Message = {
   content: string;
   report?: EnterpriseReadinessReport;
   isError?: boolean;
+};
+
+type ConversationRecord = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: Message[];
+};
+
+type ConversationState = {
+  conversations: ConversationRecord[];
+  activeConversationId: string;
+};
+
+type PendingAssistantMessage = {
+  conversationId: string;
+  message: Message;
 };
 
 const initialMessages: Message[] = [
@@ -35,16 +54,28 @@ const initialMessages: Message[] = [
 
 export default function App() {
   const [companyName, setCompanyName] = useState('');
-  const [messages, setMessages] = useState(initialMessages);
+  const [conversationState, setConversationState] = useState<ConversationState>(() =>
+    loadConversationState()
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [reportedResearchStage, setReportedResearchStage] =
     useState<ResearchProgressStage | null>(null);
   const [visibleResearchStage, setVisibleResearchStage] =
     useState<ResearchProgressStage | null>(null);
   const [pendingAssistantMessage, setPendingAssistantMessage] =
-    useState<Message | null>(null);
+    useState<PendingAssistantMessage | null>(null);
   const [, startTransition] = useTransition();
   const deferredCompanyName = useDeferredValue(companyName.trim());
+  const activeConversation = findActiveConversation(
+    conversationState.conversations,
+    conversationState.activeConversationId
+  );
+  const messages = activeConversation.messages;
+  const activeConversationTitle = getConversationTitle(activeConversation);
+
+  useEffect(() => {
+    saveConversationState(conversationState);
+  }, [conversationState]);
 
   useEffect(() => {
     if (!isLoading || !reportedResearchStage || !visibleResearchStage) {
@@ -78,7 +109,11 @@ export default function App() {
 
     const timeoutId = window.setTimeout(() => {
       startTransition(() => {
-        setMessages((current) => [...current, pendingAssistantMessage]);
+        setConversationState((current) =>
+          appendMessagesToConversation(current, pendingAssistantMessage.conversationId, [
+            pendingAssistantMessage.message
+          ])
+        );
       });
       setPendingAssistantMessage(null);
       resetResearchProgress();
@@ -95,23 +130,56 @@ export default function App() {
     setVisibleResearchStage(null);
   }
 
+  function handleCreateConversation() {
+    if (isLoading || isConversationEmpty(activeConversation)) {
+      return;
+    }
+
+    setConversationState((current) => {
+      const nextConversation = createConversationRecord();
+
+      return {
+        conversations: [nextConversation, ...current.conversations].slice(
+          0,
+          maxStoredConversations
+        ),
+        activeConversationId: nextConversation.id
+      };
+    });
+    setCompanyName('');
+  }
+
+  function handleSelectConversation(conversationId: string) {
+    if (isLoading || conversationId === conversationState.activeConversationId) {
+      return;
+    }
+
+    setConversationState((current) => ({
+      ...current,
+      activeConversationId: conversationId
+    }));
+    setCompanyName('');
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const nextCompany = companyName.trim();
+    const activeConversationId = activeConversation.id;
 
     if (!nextCompany || isLoading) {
       return;
     }
 
-    setMessages((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        role: 'user',
-        content: nextCompany
-      }
-    ]);
+    setConversationState((current) =>
+      appendMessagesToConversation(current, activeConversationId, [
+        {
+          id: crypto.randomUUID(),
+          role: 'user',
+          content: nextCompany
+        }
+      ])
+    );
     setCompanyName('');
     setIsLoading(true);
     setPendingAssistantMessage(null);
@@ -134,29 +202,37 @@ export default function App() {
 
       if (isTestMode) {
         startTransition(() => {
-          setMessages((current) => [...current, nextAssistantMessage]);
+          setConversationState((current) =>
+            appendMessagesToConversation(current, activeConversationId, [
+              nextAssistantMessage
+            ])
+          );
         });
         resetResearchProgress();
         return;
       }
 
       setReportedResearchStage('finalizing');
-      setPendingAssistantMessage(nextAssistantMessage);
+      setPendingAssistantMessage({
+        conversationId: activeConversationId,
+        message: nextAssistantMessage
+      });
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
           : 'Unexpected UI error while loading research.';
 
-      setMessages((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: message,
-          isError: true
-        }
-      ]);
+      setConversationState((current) =>
+        appendMessagesToConversation(current, activeConversationId, [
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: message,
+            isError: true
+          }
+        ])
+      );
       setPendingAssistantMessage(null);
       resetResearchProgress();
     }
@@ -181,8 +257,36 @@ export default function App() {
         <div className="signal-block">
           <p className="section-label">Current query</p>
           <p className="live-query">
-            {deferredCompanyName || 'Waiting for a vendor name'}
+            {deferredCompanyName ||
+              (isConversationEmpty(activeConversation)
+                ? 'Waiting for a vendor name'
+                : activeConversationTitle)}
           </p>
+        </div>
+
+        <div className="signal-block">
+          <div className="history-header">
+            <p className="section-label">History</p>
+            <button
+              className="history-action"
+              disabled={isLoading || isConversationEmpty(activeConversation)}
+              onClick={handleCreateConversation}
+              type="button"
+            >
+              New
+            </button>
+          </div>
+          <div className="history-list" role="list" aria-label="Conversation history">
+            {conversationState.conversations.map((conversation) => (
+              <ConversationListItem
+                active={conversation.id === conversationState.activeConversationId}
+                conversation={conversation}
+                disabled={isLoading}
+                key={conversation.id}
+                onSelect={handleSelectConversation}
+              />
+            ))}
+          </div>
         </div>
 
         <div className="signal-block">
@@ -421,6 +525,37 @@ function findResearchStageIndex(stage: ResearchProgressStage) {
   return liveResearchStages.findIndex((item) => item.stage === stage);
 }
 
+function ConversationListItem({
+  active,
+  conversation,
+  disabled,
+  onSelect
+}: {
+  active: boolean;
+  conversation: ConversationRecord;
+  disabled: boolean;
+  onSelect: (conversationId: string) => void;
+}) {
+  const latestReport = getLatestReport(conversation);
+
+  return (
+    <button
+      aria-pressed={active}
+      className={`history-item${active ? ' active' : ''}`}
+      disabled={disabled}
+      onClick={() => onSelect(conversation.id)}
+      type="button"
+    >
+      <div className="history-item-topline">
+        <strong>{getConversationTitle(conversation)}</strong>
+        {latestReport ? <StatusPill label={latestReport.recommendation} subtle /> : null}
+      </div>
+      <p>{getConversationPreview(conversation)}</p>
+      <small>{formatDate(conversation.updatedAt)}</small>
+    </button>
+  );
+}
+
 function MessageBubble({ message }: { message: Message }) {
   return (
     <article
@@ -557,4 +692,176 @@ function formatDate(value: string) {
     dateStyle: 'medium',
     timeStyle: 'short'
   }).format(parsed);
+}
+
+function loadConversationState(): ConversationState {
+  const fallbackConversation = createConversationRecord();
+
+  try {
+    const raw = window.localStorage.getItem(conversationStorageKey);
+
+    if (!raw) {
+      return {
+        conversations: [fallbackConversation],
+        activeConversationId: fallbackConversation.id
+      };
+    }
+
+    const parsed = JSON.parse(raw) as Partial<ConversationState>;
+    const conversations = Array.isArray(parsed.conversations)
+      ? sortConversations(
+          parsed.conversations.filter(isConversationRecord).map(normalizeConversation)
+        ).slice(0, maxStoredConversations)
+      : [];
+
+    if (conversations.length === 0) {
+      return {
+        conversations: [fallbackConversation],
+        activeConversationId: fallbackConversation.id
+      };
+    }
+
+    const activeConversationId =
+      typeof parsed.activeConversationId === 'string' &&
+      conversations.some((conversation) => conversation.id === parsed.activeConversationId)
+        ? parsed.activeConversationId
+        : conversations[0].id;
+
+    return {
+      conversations,
+      activeConversationId
+    };
+  } catch {
+    return {
+      conversations: [fallbackConversation],
+      activeConversationId: fallbackConversation.id
+    };
+  }
+}
+
+function saveConversationState(state: ConversationState) {
+  try {
+    window.localStorage.setItem(
+      conversationStorageKey,
+      JSON.stringify({
+        ...state,
+        conversations: sortConversations(state.conversations).slice(0, maxStoredConversations)
+      })
+    );
+  } catch {
+    // Ignore storage failures so the chat remains usable in restricted browsers.
+  }
+}
+
+function createConversationRecord(): ConversationRecord {
+  const now = new Date().toISOString();
+
+  return {
+    id: crypto.randomUUID(),
+    createdAt: now,
+    updatedAt: now,
+    messages: initialMessages.map((message) => ({ ...message }))
+  };
+}
+
+function normalizeConversation(conversation: ConversationRecord): ConversationRecord {
+  const createdAt = normalizeDateString(conversation.createdAt);
+  const updatedAt = normalizeDateString(conversation.updatedAt);
+
+  return {
+    id: conversation.id,
+    createdAt,
+    updatedAt,
+    messages:
+      Array.isArray(conversation.messages) && conversation.messages.length > 0
+        ? conversation.messages
+        : initialMessages.map((message) => ({ ...message }))
+  };
+}
+
+function normalizeDateString(value: string | undefined) {
+  if (!value) {
+    return new Date().toISOString();
+  }
+
+  const parsed = new Date(value);
+
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+
+function isConversationRecord(value: unknown): value is ConversationRecord {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<ConversationRecord>;
+
+  return typeof candidate.id === 'string' && Array.isArray(candidate.messages);
+}
+
+function findActiveConversation(
+  conversations: ConversationRecord[],
+  activeConversationId: string
+) {
+  return (
+    conversations.find((conversation) => conversation.id === activeConversationId) ??
+    conversations[0] ??
+    createConversationRecord()
+  );
+}
+
+function appendMessagesToConversation(
+  state: ConversationState,
+  conversationId: string,
+  messages: Message[]
+): ConversationState {
+  const timestamp = new Date().toISOString();
+  const nextConversations = state.conversations.map((conversation) =>
+    conversation.id === conversationId
+      ? {
+          ...conversation,
+          updatedAt: timestamp,
+          messages: [...conversation.messages, ...messages]
+        }
+      : conversation
+  );
+
+  return {
+    activeConversationId: state.activeConversationId,
+    conversations: sortConversations(nextConversations).slice(0, maxStoredConversations)
+  };
+}
+
+function sortConversations(conversations: ConversationRecord[]) {
+  return [...conversations].toSorted(
+    (left, right) =>
+      new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+  );
+}
+
+function isConversationEmpty(conversation: ConversationRecord) {
+  return !conversation.messages.some((message) => message.role === 'user');
+}
+
+function getConversationTitle(conversation: ConversationRecord) {
+  const firstUserMessage = conversation.messages.find((message) => message.role === 'user');
+
+  return firstUserMessage?.content || 'New security review';
+}
+
+function getConversationPreview(conversation: ConversationRecord) {
+  const lastMeaningfulMessage = [...conversation.messages]
+    .reverse()
+    .find((message) => message.role === 'assistant' || message.role === 'user');
+
+  return (
+    lastMeaningfulMessage?.content ||
+    'Start a new vendor review to persist results in this browser.'
+  );
+}
+
+function getLatestReport(conversation: ConversationRecord) {
+  return [...conversation.messages]
+    .reverse()
+    .find((message) => message.report)?.report;
 }
