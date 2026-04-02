@@ -160,6 +160,8 @@ Requirements:
 - use web search only for the allowed official vendor domains
 - prefer explicit vendor statements over marketing claims
 - focus first on EU data residency and enterprise deployment
+- treat explicit support for an EU residency option, EU region selection, or region pinning as meaningful support, even if it is plan-specific
+- do not confuse GDPR, SCCs, DPF, or transfer-law language with actual EU residency support unless the vendor also documents an EU data region or residency option
 - make a decision from the evidence you find
 - use unknown only when the evidence is genuinely missing or too thin to support any direction
 - keep the memo under 220 words
@@ -205,7 +207,7 @@ ${JSON.stringify(
   )}
 
 Focus on:
-- whether the product or company supports EU data residency
+- whether the product or company supports an EU data residency option or EU region selection
 - whether the product or company offers enterprise deployment options
 
 Produce a concise risk-oriented verdict with evidence and confidence.

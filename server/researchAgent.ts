@@ -22,10 +22,10 @@ import { presentDecision } from './research/presentation.js';
 type ResearchProgressListener = (update: ResearchProgressUpdate) => void;
 
 function getResearchTimeoutMs() {
-  const parsed = Number(process.env.RESEARCH_TIMEOUT_MS ?? 90_000);
+  const parsed = Number(process.env.RESEARCH_TIMEOUT_MS ?? 180_000);
 
   if (!Number.isFinite(parsed) || parsed < 15_000) {
-    return 90_000;
+    return 180_000;
   }
 
   return parsed;
@@ -64,7 +64,7 @@ async function runResearchWorkflow(
     | undefined;
   let memo = '';
   let decision:
-    | ReturnType<typeof buildDecisionFromMemo>
+    | Awaited<ReturnType<typeof buildDecisionFromMemo>>
     | undefined;
 
   try {
@@ -101,7 +101,13 @@ async function runResearchWorkflow(
     });
 
     phase = 'decision';
-    decision = buildDecisionFromMemo(resolution.canonicalName, memo, resolution);
+    decision = await buildDecisionFromMemo(
+      resolution.canonicalName,
+      memo,
+      resolution,
+      startedAt,
+      budgetMs
+    );
     logResearchEvent('decision_built', {
       runId,
       canonicalName: decision.companyName,
