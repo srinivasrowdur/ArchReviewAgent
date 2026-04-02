@@ -1,6 +1,8 @@
 import { z } from 'zod';
-import type { EnterpriseReadinessReport } from '../../shared/contracts.js';
-import { IncompleteResearchError } from './errors.js';
+import type {
+  EnterpriseReadinessReport,
+  RecommendationLevel
+} from '../../shared/contracts.js';
 import { normalizeHostname, type VendorResolution } from './vendorIntake.js';
 
 const evidenceItemSchema = z.object({
@@ -19,29 +21,27 @@ const assessmentSchema = z.object({
   evidence: z.array(evidenceItemSchema).max(5)
 });
 
-const enterpriseReadinessSchema = z.object({
+const researchDecisionSchema = z.object({
   companyName: z.string(),
   researchedAt: z.string(),
-  overview: z.string(),
-  executiveSummary: z.string(),
+  vendorOverview: z.string(),
+  preliminaryVerdict: z.string(),
   recommendation: z.enum(['green', 'yellow', 'red']),
-  deploymentVerdict: z.string(),
   guardrails: z.object({
     euDataResidency: assessmentSchema,
     enterpriseDeployment: assessmentSchema
   }),
-  unansweredQuestions: z.array(z.string()).max(6),
-  nextSteps: z.array(z.string()).max(6)
+  unansweredQuestions: z.array(z.string()).max(6)
 });
 
-type StructuredReadinessReport = z.infer<typeof enterpriseReadinessSchema>;
-type GuardrailKey = keyof StructuredReadinessReport['guardrails'];
+export type ResearchDecision = z.infer<typeof researchDecisionSchema>;
+type GuardrailKey = keyof EnterpriseReadinessReport['guardrails'];
 
-export function buildReportFromMemo(
+export function buildDecisionFromMemo(
   companyName: string,
   memo: string,
   resolution: VendorResolution
-): EnterpriseReadinessReport {
+): ResearchDecision {
   const sections = parseMemoSections(memo);
   const vendorSummary = sections.vendor || memo;
   const euDataResidency = buildAssessment(
@@ -59,64 +59,19 @@ export function buildReportFromMemo(
     euDataResidency.status,
     enterpriseDeployment.status
   );
-  const parsedReport = enterpriseReadinessSchema.parse({
+
+  return researchDecisionSchema.parse({
     companyName,
     researchedAt: new Date().toISOString(),
-    overview: vendorSummary.slice(0, 420),
-    executiveSummary:
-      sections.preliminaryVerdict || buildExecutiveSummary(companyName, recommendation),
+    vendorOverview: vendorSummary.slice(0, 420),
+    preliminaryVerdict: sections.preliminaryVerdict.trim(),
     recommendation,
-    deploymentVerdict:
-      sections.preliminaryVerdict ||
-      'Security analyst verdict generated from the live research memo.',
     guardrails: {
       euDataResidency,
       enterpriseDeployment
     },
-    unansweredQuestions: extractListItems(sections.unansweredQuestions),
-    nextSteps: buildNextSteps(recommendation)
+    unansweredQuestions: extractListItems(sections.unansweredQuestions)
   });
-
-  validateCoverage(parsedReport);
-
-  return normalizeReport(parsedReport, companyName);
-}
-
-function normalizeReport(
-  report: StructuredReadinessReport,
-  fallbackCompanyName: string
-): EnterpriseReadinessReport {
-  return {
-    ...report,
-    companyName: report.companyName.trim() || fallbackCompanyName,
-    researchedAt: normalizeIsoDate(report.researchedAt),
-    overview: report.overview.trim(),
-    executiveSummary: report.executiveSummary.trim(),
-    deploymentVerdict: report.deploymentVerdict.trim(),
-    unansweredQuestions: report.unansweredQuestions.filter(Boolean),
-    nextSteps: report.nextSteps.filter(Boolean)
-  };
-}
-
-function normalizeIsoDate(value: string) {
-  const parsed = new Date(value);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return new Date().toISOString();
-  }
-
-  return parsed.toISOString();
-}
-
-function validateCoverage(report: StructuredReadinessReport) {
-  const hasExecutiveSummary = report.executiveSummary.trim().length > 80;
-  const hasEuSummary = report.guardrails.euDataResidency.summary.trim().length > 0;
-  const hasDeploymentSummary =
-    report.guardrails.enterpriseDeployment.summary.trim().length > 0;
-
-  if (!hasExecutiveSummary || !hasEuSummary || !hasDeploymentSummary) {
-    throw new IncompleteResearchError();
-  }
 }
 
 function parseMemoSections(memo: string) {
@@ -260,7 +215,7 @@ function deriveStatus(
   fullText: string,
   summary: string,
   evidenceCount: number
-): StructuredReadinessReport['guardrails']['euDataResidency']['status'] {
+): EnterpriseReadinessReport['guardrails']['euDataResidency']['status'] {
   const lower = `${summary} ${fullText}`.toLowerCase();
   const hasPositiveSignal =
     guardrailKey === 'euDataResidency'
@@ -323,7 +278,7 @@ function deriveConfidence(
   fullText: string,
   summary: string,
   evidenceCount: number,
-  status: StructuredReadinessReport['guardrails']['euDataResidency']['status']
+  status: EnterpriseReadinessReport['guardrails']['euDataResidency']['status']
 ): 'high' | 'medium' | 'low' {
   const lower = `${summary} ${fullText}`.toLowerCase();
   const hasExplicitSignal =
@@ -362,7 +317,7 @@ function deriveRisks(
   guardrailKey: GuardrailKey,
   fullText: string,
   summary: string,
-  status: StructuredReadinessReport['guardrails']['euDataResidency']['status']
+  status: EnterpriseReadinessReport['guardrails']['euDataResidency']['status']
 ) {
   const lower = `${summary} ${fullText}`.toLowerCase();
   const risks: string[] = [];
@@ -502,7 +457,7 @@ function isPrimarySource(url: string) {
 
 function extractListItems(text: string) {
   if (!text.trim()) {
-    return ['No specific unanswered questions were captured in the research memo.'];
+    return [];
   }
 
   const bulletPieces = text
@@ -536,9 +491,9 @@ function inferSectionFromMemo(memo: string, keywords: string[]) {
 }
 
 function deriveRecommendation(
-  euStatus: StructuredReadinessReport['guardrails']['euDataResidency']['status'],
-  deploymentStatus: StructuredReadinessReport['guardrails']['enterpriseDeployment']['status']
-): StructuredReadinessReport['recommendation'] {
+  euStatus: EnterpriseReadinessReport['guardrails']['euDataResidency']['status'],
+  deploymentStatus: EnterpriseReadinessReport['guardrails']['enterpriseDeployment']['status']
+): RecommendationLevel {
   if (euStatus === 'unsupported' || deploymentStatus === 'unsupported') {
     return 'red';
   }
@@ -553,32 +508,4 @@ function deriveRecommendation(
   }
 
   return 'green';
-}
-
-function buildExecutiveSummary(
-  companyName: string,
-  recommendation: StructuredReadinessReport['recommendation']
-) {
-  const posture =
-    recommendation === 'green'
-      ? 'looks acceptable from a security review perspective'
-      : recommendation === 'yellow'
-        ? 'shows mixed security and deployment signals'
-        : 'shows material security-review risk';
-
-  return `${companyName} ${posture}, with the strongest emphasis on EU data residency and enterprise deployment posture. This is an evidence-based security assessment, and the confidence level reflects how explicit the public vendor documentation is.`;
-}
-
-function buildNextSteps(recommendation: StructuredReadinessReport['recommendation']) {
-  const steps = [
-    'Review the cited vendor documentation directly.',
-    'Confirm data residency and deployment terms in writing with the vendor.',
-    'Validate plan-specific controls such as SSO, SCIM, audit logs, and contractual commitments.'
-  ];
-
-  if (recommendation !== 'green') {
-    steps.unshift('Escalate the guardrail gap before approving the vendor.');
-  }
-
-  return steps.slice(0, 6);
 }

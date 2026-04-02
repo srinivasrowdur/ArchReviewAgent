@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildReportFromMemo } from './decisioning.js';
+import { buildDecisionFromMemo } from './decisioning.js';
 import type { VendorResolution } from './vendorIntake.js';
 
 const resolution: VendorResolution = {
@@ -11,7 +11,7 @@ const resolution: VendorResolution = {
   rationale: 'Resolved to the SaaS vendor.'
 };
 
-test('buildReportFromMemo converts a markdown memo into a structured report', () => {
+test('buildDecisionFromMemo converts a markdown memo into a structured decision', () => {
   const memo = `
 **Vendor**
 Grammarly is a writing assistant sold to enterprise teams.
@@ -32,28 +32,28 @@ Grammarly shows material security-review risk because public evidence does not s
 - Is data region pinning contractually committed?
 `.trim();
 
-  const report = buildReportFromMemo('Grammarly', memo, resolution);
+  const decision = buildDecisionFromMemo('Grammarly', memo, resolution);
 
-  assert.equal(report.companyName, 'Grammarly');
-  assert.equal(report.guardrails.euDataResidency.status, 'unsupported');
-  assert.equal(report.guardrails.euDataResidency.confidence, 'high');
-  assert.equal(report.guardrails.enterpriseDeployment.status, 'supported');
-  assert.equal(report.recommendation, 'red');
-  assert.doesNotMatch(report.guardrails.euDataResidency.summary, /https?:\/\//);
+  assert.equal(decision.companyName, 'Grammarly');
+  assert.equal(decision.guardrails.euDataResidency.status, 'unsupported');
+  assert.equal(decision.guardrails.euDataResidency.confidence, 'high');
+  assert.equal(decision.guardrails.enterpriseDeployment.status, 'supported');
+  assert.equal(decision.recommendation, 'red');
+  assert.doesNotMatch(decision.guardrails.euDataResidency.summary, /https?:\/\//);
   assert.deepEqual(
-    report.guardrails.euDataResidency.evidence.map((item) => item.url),
+    decision.guardrails.euDataResidency.evidence.map((item) => item.url),
     [
       'https://www.grammarly.com/security',
       'https://www.grammarly.com/privacy-policy-spring-2023'
     ]
   );
-  assert.deepEqual(report.unansweredQuestions, [
+  assert.deepEqual(decision.unansweredQuestions, [
     'Is BYOK available on the plan in scope?',
     'Is data region pinning contractually committed?'
   ]);
 });
 
-test('buildReportFromMemo classifies conditional EU residency as partial', () => {
+test('buildDecisionFromMemo classifies conditional EU residency as partial', () => {
   const memo = `
 Vendor: ExampleCo
 EU data residency: EU region hosting is available for some enterprise plans, but transfers outside the EU may still occur under contractual safeguards. Sources: https://www.exampleco.com/security
@@ -61,22 +61,22 @@ Enterprise deployment: Supports SAML SSO, SCIM, audit logs, and admin controls. 
 Preliminary verdict: ExampleCo has a mixed security posture because EU residency appears conditional rather than default, even though enterprise identity and administration controls are documented in vendor materials.
 `.trim();
 
-  const report = buildReportFromMemo('ExampleCo', memo, {
+  const decision = buildDecisionFromMemo('ExampleCo', memo, {
     ...resolution,
     canonicalName: 'ExampleCo',
     officialDomains: ['exampleco.com']
   });
 
-  assert.equal(report.guardrails.euDataResidency.status, 'partial');
-  assert.equal(report.guardrails.enterpriseDeployment.status, 'supported');
-  assert.equal(report.recommendation, 'yellow');
+  assert.equal(decision.guardrails.euDataResidency.status, 'partial');
+  assert.equal(decision.guardrails.enterpriseDeployment.status, 'supported');
+  assert.equal(decision.recommendation, 'yellow');
   assert.match(
-    report.guardrails.euDataResidency.risks[0] ?? '',
+    decision.guardrails.euDataResidency.risks[0] ?? '',
     /conditional|compliance-based/i
   );
 });
 
-test('buildReportFromMemo uses unknown only when the memo lacks decisive evidence', () => {
+test('buildDecisionFromMemo uses unknown only when the memo lacks decisive evidence', () => {
   const memo = `
 Vendor: QuietVendor
 EU data residency: Data residency is not publicly stated in current vendor materials.
@@ -84,14 +84,15 @@ Enterprise deployment: Supports SAML SSO and SCIM provisioning. Sources: https:/
 Preliminary verdict: Security review is incomplete because residency evidence is missing from public sources.
 `.trim();
 
-  const report = buildReportFromMemo('QuietVendor', memo, {
+  const decision = buildDecisionFromMemo('QuietVendor', memo, {
     ...resolution,
     canonicalName: 'QuietVendor',
     officialDomains: ['quietvendor.com']
   });
 
-  assert.equal(report.guardrails.euDataResidency.status, 'unknown');
-  assert.equal(report.guardrails.euDataResidency.confidence, 'low');
-  assert.equal(report.guardrails.enterpriseDeployment.status, 'supported');
-  assert.equal(report.recommendation, 'yellow');
+  assert.equal(decision.guardrails.euDataResidency.status, 'unknown');
+  assert.equal(decision.guardrails.euDataResidency.confidence, 'low');
+  assert.equal(decision.guardrails.enterpriseDeployment.status, 'supported');
+  assert.equal(decision.recommendation, 'yellow');
+  assert.deepEqual(decision.unansweredQuestions, []);
 });

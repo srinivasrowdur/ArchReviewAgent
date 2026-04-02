@@ -12,7 +12,8 @@ import {
 } from './research/errors.js';
 import { generateResearchMemo } from './research/retrieval.js';
 import { type ResearchProgressUpdate } from '../shared/contracts.js';
-import { buildReportFromMemo } from './research/decisioning.js';
+import { buildDecisionFromMemo } from './research/decisioning.js';
+import { presentDecision } from './research/presentation.js';
 type ResearchProgressListener = (update: ResearchProgressUpdate) => void;
 
 function getResearchTimeoutMs() {
@@ -53,7 +54,8 @@ async function runResearchWorkflow(
   const budgetMs = getResearchTimeoutMs();
   const resolution = await resolveVendorIdentity(companyName, startedAt, budgetMs);
   const memo = await generateResearchMemo(resolution, startedAt, budgetMs, onProgress);
-  return buildReportFromMemo(resolution.canonicalName, memo, resolution);
+  const decision = buildDecisionFromMemo(resolution.canonicalName, memo, resolution);
+  return presentDecision(decision);
 }
 
 export {
