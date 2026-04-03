@@ -19,6 +19,7 @@ const dateFormatter = new Intl.DateTimeFormat('en-GB', {
   dateStyle: 'medium',
   timeStyle: 'short'
 });
+const starterCompanies = ['Grammarly', 'Microsoft Fabric', 'Miro'] as const;
 
 type Message = {
   id: string;
@@ -165,10 +166,7 @@ export default function App() {
     setCompanyName('');
   }
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const nextCompany = companyName.trim();
+  async function submitResearch(nextCompany: string) {
     const activeConversationId = activeConversation.id;
 
     if (!nextCompany || isLoading) {
@@ -240,6 +238,16 @@ export default function App() {
       setPendingAssistantMessage(null);
       resetResearchProgress();
     }
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await submitResearch(companyName.trim());
+  }
+
+  function handleStarterCompanyClick(company: (typeof starterCompanies)[number]) {
+    setCompanyName(company);
+    void submitResearch(company);
   }
 
   return (
@@ -337,13 +345,26 @@ export default function App() {
             <label className="composer-label" htmlFor="companyName">
               Company or product name
             </label>
+            <div className="composer-presets" aria-label="Suggested companies">
+              {starterCompanies.map((company) => (
+                <button
+                  className="composer-preset"
+                  disabled={isLoading}
+                  key={company}
+                  onClick={() => handleStarterCompanyClick(company)}
+                  type="button"
+                >
+                  {company}
+                </button>
+              ))}
+            </div>
             <div className="composer-row">
               <input
                 id="companyName"
                 name="companyName"
                 value={companyName}
                 onChange={(event) => setCompanyName(event.target.value)}
-                placeholder="e.g. Notion, Databricks, Miro"
+                placeholder="e.g. Grammarly, Databricks"
                 autoComplete="off"
               />
               <button disabled={isLoading} type="submit">
