@@ -38,3 +38,26 @@ export function describeError(error: unknown) {
     errorMessage: String(error)
   };
 }
+
+export function summarizeInputForLog(value: string, maxLength: number = 80) {
+  const normalized = value
+    .normalize('NFKC')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) {
+    return {
+      preview: '',
+      length: 0
+    };
+  }
+
+  return {
+    preview:
+      normalized.length <= maxLength
+        ? normalized
+        : `${normalized.slice(0, maxLength - 3).trimEnd()}...`,
+    length: normalized.length
+  };
+}

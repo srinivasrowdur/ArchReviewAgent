@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDecisionFromMemo } from './decisioning.js';
+import { ResearchTimeoutError } from './errors.js';
 import type { VendorResolution } from './vendorIntake.js';
 
 const resolution: VendorResolution = {
@@ -183,6 +184,37 @@ test('buildDecisionFromMemo tolerates partial LLM output and defaults missing se
   assert.match(decision.preliminaryVerdict, /EU data residency is supported/i);
 });
 
+test('buildDecisionFromMemo downgrades optimistic recommendations when normalized statuses are weaker', async () => {
+  const decision = await buildDecisionFromMemo(
+    'Grammarly',
+    'memo',
+    resolution,
+    Date.now(),
+    30_000,
+    async () => ({
+      finalOutput: {
+        companyName: 'Grammarly',
+        researchedAt: new Date('2026-04-03T10:00:00Z').toISOString(),
+        vendorOverview: 'Grammarly provides writing assistance for enterprises.',
+        preliminaryVerdict: 'Looks strong overall.',
+        recommendation: 'green',
+        guardrails: {
+          euDataResidency: {
+            status: 'supported',
+            confidence: 'high',
+            summary: 'EU region support is documented.',
+            risks: [],
+            evidence: []
+          }
+        }
+      }
+    })
+  );
+
+  assert.equal(decision.guardrails.enterpriseDeployment.status, 'unknown');
+  assert.equal(decision.recommendation, 'yellow');
+});
+
 test('buildDecisionFromMemo truncates oversized evidence fields instead of rejecting the decision', async () => {
   const longFinding =
     'Microsoft documents regional deployment controls for Fabric workloads and related data services, but the evidence summary returned by the model is intentionally verbose here so it exceeds the downstream presentation limit and exercises raw-schema tolerance before normalization.'.repeat(
@@ -240,4 +272,21 @@ test('buildDecisionFromMemo truncates oversized evidence fields instead of rejec
   assert.equal(decision.guardrails.euDataResidency.evidence.length, 1);
   assert.ok(decision.guardrails.euDataResidency.evidence[0]);
   assert.ok(decision.guardrails.euDataResidency.evidence[0]!.finding.length <= 220);
+});
+
+test('buildDecisionFromMemo maps decision-stage budget exhaustion to ResearchTimeoutError', async () => {
+  await assert.rejects(
+    () =>
+      buildDecisionFromMemo(
+        'Grammarly',
+        'memo',
+        resolution,
+        Date.now() - 29_500,
+        30_000,
+        async () => ({
+          finalOutput: {}
+        })
+      ),
+    (error: unknown) => error instanceof ResearchTimeoutError
+  );
 });

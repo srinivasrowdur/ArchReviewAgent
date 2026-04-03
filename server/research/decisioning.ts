@@ -1,6 +1,7 @@
 import { Agent, run } from '@openai/agents';
 import { z } from 'zod';
 import { normalizeHostname, type VendorResolution } from './vendorIntake.js';
+import { ResearchTimeoutError } from './errors.js';
 
 const evidenceItemSchema = z.object({
   title: z.string().min(1).max(160),
@@ -138,30 +139,38 @@ export async function buildDecisionFromMemo(
   const remainingMs = budgetMs - (Date.now() - startedAt);
 
   if (remainingMs <= 1_000) {
-    throw new Error('Insufficient time budget remaining for decision stage.');
+    throw new ResearchTimeoutError();
   }
 
-  const signal = AbortSignal.timeout(Math.min(remainingMs, 20_000));
-  const result = await runDecision(
-    decisionAgent,
-    buildDecisionPrompt(companyName, memo, resolution),
-    {
-      maxTurns: 4,
-      signal
-    }
-  );
+  try {
+    const signal = AbortSignal.timeout(Math.min(remainingMs, 20_000));
+    const result = await runDecision(
+      decisionAgent,
+      buildDecisionPrompt(companyName, memo, resolution),
+      {
+        maxTurns: 4,
+        signal
+      }
+    );
 
-  return normalizeDecisionOutput(
-    await parseDecisionOutput(
-      result.finalOutput,
-      startedAt,
-      budgetMs,
-      runDecision
-    ),
-    companyName,
-    memo,
-    resolution
-  );
+    return normalizeDecisionOutput(
+      await parseDecisionOutput(
+        result.finalOutput,
+        startedAt,
+        budgetMs,
+        runDecision
+      ),
+      companyName,
+      memo,
+      resolution
+    );
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new ResearchTimeoutError();
+    }
+
+    throw error;
+  }
 }
 
 function buildDecisionPrompt(
@@ -239,34 +248,42 @@ async function repairDecisionJson(
   const remainingMs = budgetMs - (Date.now() - startedAt);
 
   if (remainingMs <= 1_000) {
-    throw new Error('Insufficient time budget remaining to repair decision JSON.');
+    throw new ResearchTimeoutError();
   }
 
-  const result = await runDecision(
-    decisionJsonRepairAgent,
-    `
+  try {
+    const result = await runDecision(
+      decisionJsonRepairAgent,
+      `
 Repair this malformed JSON so it becomes valid JSON with the same meaning.
 
 Malformed JSON:
 ${rawJson}
     `.trim(),
-    {
-      maxTurns: 2,
-      signal: AbortSignal.timeout(Math.min(remainingMs, 10_000))
+      {
+        maxTurns: 2,
+        signal: AbortSignal.timeout(Math.min(remainingMs, 10_000))
+      }
+    );
+
+    if (typeof result.finalOutput !== 'string') {
+      throw new Error('Decision JSON repair did not return text.');
     }
-  );
 
-  if (typeof result.finalOutput !== 'string') {
-    throw new Error('Decision JSON repair did not return text.');
+    const normalized = result.finalOutput
+      .trim()
+      .replace(/^```json\s*/i, '')
+      .replace(/```$/i, '')
+      .trim();
+
+    return extractJsonObject(normalized) ?? normalized;
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new ResearchTimeoutError();
+    }
+
+    throw error;
   }
-
-  const normalized = result.finalOutput
-    .trim()
-    .replace(/^```json\s*/i, '')
-    .replace(/```$/i, '')
-    .trim();
-
-  return extractJsonObject(normalized) ?? normalized;
 }
 
 function normalizeDecisionOutput(
@@ -505,10 +522,30 @@ function normalizeRecommendation(
   euStatus: ResearchDecision['guardrails']['euDataResidency']['status'],
   deploymentStatus: ResearchDecision['guardrails']['enterpriseDeployment']['status']
 ): ResearchDecision['recommendation'] {
-  if (recommendation) {
-    return recommendation;
+  const derivedRecommendation = deriveRecommendationFromStatuses(
+    euStatus,
+    deploymentStatus
+  );
+
+  if (!recommendation) {
+    return derivedRecommendation;
   }
 
+  const severity = {
+    green: 0,
+    yellow: 1,
+    red: 2
+  } as const;
+
+  return severity[recommendation] >= severity[derivedRecommendation]
+    ? recommendation
+    : derivedRecommendation;
+}
+
+function deriveRecommendationFromStatuses(
+  euStatus: ResearchDecision['guardrails']['euDataResidency']['status'],
+  deploymentStatus: ResearchDecision['guardrails']['enterpriseDeployment']['status']
+): ResearchDecision['recommendation'] {
   if (euStatus === 'unsupported' || deploymentStatus === 'unsupported') {
     return 'red';
   }
@@ -522,6 +559,21 @@ function normalizeRecommendation(
   }
 
   return 'green';
+}
+
+function isAbortError(error: unknown) {
+  const constructorName =
+    error && typeof error === 'object' && 'constructor' in error
+      ? (error.constructor as { name?: string }).name
+      : undefined;
+
+  return (
+    error instanceof Error &&
+    (error.name === 'AbortError' ||
+      error.name === 'TimeoutError' ||
+      error.name === 'APIUserAbortError' ||
+      constructorName === 'APIUserAbortError')
+  );
 }
 
 function normalizeEvidenceUrl(url: string, allowedDomains: string[]) {

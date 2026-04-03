@@ -16,7 +16,8 @@ import { buildDecisionFromMemo } from './research/decisioning.js';
 import {
   createResearchRunId,
   describeError,
-  logResearchEvent
+  logResearchEvent,
+  summarizeInputForLog
 } from './research/logging.js';
 import { presentDecision } from './research/presentation.js';
 type ResearchProgressListener = (update: ResearchProgressUpdate) => void;
@@ -138,10 +139,13 @@ async function runResearchWorkflow(
 
     return report;
   } catch (error) {
+    const inputSummary = summarizeInputForLog(rawCompanyName);
+
     logResearchEvent('research_failed', {
       runId,
       phase,
-      companyName,
+      companyName: phase === 'intake' ? inputSummary.preview : companyName,
+      companyNameLength: inputSummary.length,
       canonicalName: resolution?.canonicalName,
       officialDomains: resolution?.officialDomains,
       memoLength: memo.length,
