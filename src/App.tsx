@@ -851,9 +851,10 @@ function getConversationTitle(conversation: ConversationRecord) {
 }
 
 function getConversationPreview(conversation: ConversationRecord) {
-  const lastMeaningfulMessage = [...conversation.messages]
-    .reverse()
-    .find((message) => message.role === 'assistant' || message.role === 'user');
+  const lastMeaningfulMessage = findLastMessage(
+    conversation.messages,
+    (message) => message.role === 'assistant' || message.role === 'user'
+  );
 
   return (
     lastMeaningfulMessage?.content ||
@@ -862,7 +863,20 @@ function getConversationPreview(conversation: ConversationRecord) {
 }
 
 function getLatestReport(conversation: ConversationRecord) {
-  return [...conversation.messages]
-    .reverse()
-    .find((message) => message.report)?.report;
+  return findLastMessage(conversation.messages, (message) => Boolean(message.report))?.report;
+}
+
+function findLastMessage(
+  messages: Message[],
+  predicate: (message: Message) => boolean
+) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+
+    if (predicate(message)) {
+      return message;
+    }
+  }
+
+  return undefined;
 }
