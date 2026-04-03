@@ -32,18 +32,10 @@ function getResearchTimeoutMs() {
   return parsed;
 }
 
-export async function researchCompany(companyName: string) {
-  return runResearchWorkflow(companyName);
-}
-
-export async function researchCompanyStream(
+export async function researchCompany(
   companyName: string,
   onProgress?: ResearchProgressListener
 ) {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new MissingOpenAIKeyError();
-  }
-
   return runResearchWorkflow(companyName, onProgress);
 }
 

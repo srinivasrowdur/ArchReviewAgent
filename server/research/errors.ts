@@ -39,3 +39,18 @@ export class VendorResolutionError extends Error {
     this.name = 'VendorResolutionError';
   }
 }
+
+export function isAbortError(error: unknown) {
+  const constructorName =
+    error && typeof error === 'object' && 'constructor' in error
+      ? (error.constructor as { name?: string }).name
+      : undefined;
+
+  return (
+    error instanceof Error &&
+    (error.name === 'AbortError' ||
+      error.name === 'TimeoutError' ||
+      error.name === 'APIUserAbortError' ||
+      constructorName === 'APIUserAbortError')
+  );
+}

@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import type {
   EnterpriseReadinessReport,
   GuardrailAssessment,
@@ -15,6 +15,10 @@ const isTestMode =
   new URLSearchParams(window.location.search).get('mode') === 'test';
 const conversationStorageKey = `archreviewagent.conversations.${isTestMode ? 'test' : 'live'}`;
 const maxStoredConversations = 40;
+const dateFormatter = new Intl.DateTimeFormat('en-GB', {
+  dateStyle: 'medium',
+  timeStyle: 'short'
+});
 
 type Message = {
   id: string;
@@ -65,7 +69,7 @@ export default function App() {
   const [pendingAssistantMessage, setPendingAssistantMessage] =
     useState<PendingAssistantMessage | null>(null);
   const [, startTransition] = useTransition();
-  const deferredCompanyName = useDeferredValue(companyName.trim());
+  const trimmedCompanyName = companyName.trim();
   const activeConversation = findActiveConversation(
     conversationState.conversations,
     conversationState.activeConversationId
@@ -257,7 +261,7 @@ export default function App() {
         <div className="signal-block">
           <p className="section-label">Current query</p>
           <p className="live-query">
-            {deferredCompanyName ||
+            {trimmedCompanyName ||
               (isConversationEmpty(activeConversation)
                 ? 'Waiting for a vendor name'
                 : activeConversationTitle)}
@@ -688,10 +692,7 @@ function formatDate(value: string) {
     return value;
   }
 
-  return new Intl.DateTimeFormat('en-GB', {
-    dateStyle: 'medium',
-    timeStyle: 'short'
-  }).format(parsed);
+  return dateFormatter.format(parsed);
 }
 
 function loadConversationState(): ConversationState {
@@ -745,7 +746,7 @@ function saveConversationState(state: ConversationState) {
       conversationStorageKey,
       JSON.stringify({
         ...state,
-        conversations: sortConversations(state.conversations).slice(0, maxStoredConversations)
+        conversations: state.conversations.slice(0, maxStoredConversations)
       })
     );
   } catch {
