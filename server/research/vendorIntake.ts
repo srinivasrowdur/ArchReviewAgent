@@ -2,6 +2,7 @@ import { Agent, run } from '@openai/agents';
 import { z } from 'zod';
 import {
   InvalidVendorInputError,
+  isAbortError,
   ResearchTimeoutError,
   VendorResolutionError
 } from './errors.js';
@@ -192,19 +193,4 @@ ${JSON.stringify({ companyName })}
 
 Return the canonical vendor name, official vendor-controlled domains, confidence, alternatives, and short rationale.
 `.trim();
-}
-
-function isAbortError(error: unknown) {
-  const constructorName =
-    error && typeof error === 'object' && 'constructor' in error
-      ? (error.constructor as { name?: string }).name
-      : undefined;
-
-  return (
-    error instanceof Error &&
-    (error.name === 'AbortError' ||
-      error.name === 'TimeoutError' ||
-      error.name === 'APIUserAbortError' ||
-      constructorName === 'APIUserAbortError')
-  );
 }

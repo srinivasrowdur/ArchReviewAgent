@@ -1,7 +1,7 @@
 import { Agent, run } from '@openai/agents';
 import { z } from 'zod';
 import { normalizeHostname, type VendorResolution } from './vendorIntake.js';
-import { ResearchTimeoutError } from './errors.js';
+import { isAbortError, ResearchTimeoutError } from './errors.js';
 
 const evidenceItemSchema = z.object({
   title: z.string().min(1).max(160),
@@ -561,21 +561,6 @@ function deriveRecommendationFromStatuses(
   return 'green';
 }
 
-function isAbortError(error: unknown) {
-  const constructorName =
-    error && typeof error === 'object' && 'constructor' in error
-      ? (error.constructor as { name?: string }).name
-      : undefined;
-
-  return (
-    error instanceof Error &&
-    (error.name === 'AbortError' ||
-      error.name === 'TimeoutError' ||
-      error.name === 'APIUserAbortError' ||
-      constructorName === 'APIUserAbortError')
-  );
-}
-
 function normalizeEvidenceUrl(url: string, allowedDomains: string[]) {
   try {
     const parsed = new URL(url);
@@ -585,29 +570,31 @@ function normalizeEvidenceUrl(url: string, allowedDomains: string[]) {
       parsed.searchParams.delete(key)
     );
 
+    if (!isAllowedVendorHostname(parsed.hostname, allowedDomains)) {
+      return '';
+    }
+
     const normalized = `${parsed.origin}${parsed.pathname}${parsed.search ? parsed.search : ''}`.replace(
       /\/$/,
       ''
     );
 
-    return isAllowedVendorUrl(normalized, allowedDomains) ? normalized : '';
+    return normalized;
   } catch {
     return '';
   }
 }
 
-function isAllowedVendorUrl(url: string, allowedDomains: string[]) {
-  try {
-    const hostname = normalizeHostname(new URL(url).hostname);
+function isAllowedVendorHostname(hostname: string, allowedDomains: string[]) {
+  const normalizedHostname = normalizeHostname(hostname);
 
-    return allowedDomains.some((domain) => {
-      const normalizedDomain = normalizeHostname(domain);
-
-      return hostname === normalizedDomain || hostname.endsWith(`.${normalizedDomain}`);
-    });
-  } catch {
+  if (!normalizedHostname) {
     return false;
   }
+
+  return allowedDomains.some(
+    (domain) => normalizedHostname === domain || normalizedHostname.endsWith(`.${domain}`)
+  );
 }
 
 function evidenceTitleFromUrl(url: string) {

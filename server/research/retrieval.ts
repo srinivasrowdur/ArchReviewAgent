@@ -9,6 +9,7 @@ import type { ResearchProgressStage, ResearchProgressUpdate } from '../../shared
 import { liveResearchStages } from '../../shared/contracts.js';
 import type { VendorResolution } from './vendorIntake.js';
 import {
+  isAbortError,
   ResearchGenerationError,
   ResearchTimeoutError
 } from './errors.js';
@@ -277,22 +278,6 @@ function updateProgressFromStreamEvent(
 
   return nextMemoText;
 }
-
-function isAbortError(error: unknown) {
-  const constructorName =
-    error && typeof error === 'object' && 'constructor' in error
-      ? (error.constructor as { name?: string }).name
-      : undefined;
-
-  return (
-    error instanceof Error &&
-    (error.name === 'AbortError' ||
-      error.name === 'TimeoutError' ||
-      error.name === 'APIUserAbortError' ||
-      constructorName === 'APIUserAbortError')
-  );
-}
-
 function isRetryableModelError(error: unknown) {
   return (
     error instanceof ModelBehaviorError ||
