@@ -2,14 +2,10 @@ import { Agent, run } from '@openai/agents';
 import { z } from 'zod';
 import { normalizeHostname, type VendorResolution } from './vendorIntake.js';
 import { isAbortError, ResearchTimeoutError } from './errors.js';
-
-const evidenceItemSchema = z.object({
-  title: z.string().min(1).max(160),
-  url: z.string().min(1).max(400),
-  publisher: z.string().min(1).max(120),
-  finding: z.string().min(1).max(220),
-  sourceType: z.enum(['primary', 'secondary'])
-});
+import {
+  guardrailsSchema,
+  normalizeIsoDate
+} from './reportSchema.js';
 
 const rawEvidenceItemSchema = z.object({
   title: z.string().min(1).max(400),
@@ -17,14 +13,6 @@ const rawEvidenceItemSchema = z.object({
   publisher: z.string().min(1).max(240),
   finding: z.string().min(1).max(4000),
   sourceType: z.enum(['primary', 'secondary'])
-});
-
-const assessmentSchema = z.object({
-  status: z.enum(['supported', 'partial', 'unsupported', 'unknown']),
-  confidence: z.enum(['high', 'medium', 'low']),
-  summary: z.string().min(1).max(420),
-  risks: z.array(z.string().min(1).max(220)).max(5),
-  evidence: z.array(evidenceItemSchema).max(5)
 });
 
 const rawAssessmentSchema = z.object({
@@ -41,10 +29,7 @@ const researchDecisionSchema = z.object({
   vendorOverview: z.string().min(1).max(420),
   preliminaryVerdict: z.string().max(420),
   recommendation: z.enum(['green', 'yellow', 'red']),
-  guardrails: z.object({
-    euDataResidency: assessmentSchema,
-    enterpriseDeployment: assessmentSchema
-  }),
+  guardrails: guardrailsSchema,
   unansweredQuestions: z.array(z.string().min(1).max(220)).max(6)
 });
 
@@ -620,20 +605,6 @@ function extractOverviewFromMemo(memo: string) {
   const compact = memo.replace(/\s+/g, ' ').trim();
 
   return compact || 'No vendor overview was captured in the research memo.';
-}
-
-function normalizeIsoDate(value: string | undefined) {
-  if (!value?.trim()) {
-    return new Date().toISOString();
-  }
-
-  const parsed = new Date(value);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return new Date().toISOString();
-  }
-
-  return parsed.toISOString();
 }
 
 function truncate(text: string, maxLength: number) {

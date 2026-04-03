@@ -5,22 +5,7 @@ import type {
 } from '../../shared/contracts.js';
 import { IncompleteResearchError } from './errors.js';
 import type { ResearchDecision } from './decisioning.js';
-
-const evidenceItemSchema = z.object({
-  title: z.string(),
-  url: z.string(),
-  publisher: z.string(),
-  finding: z.string(),
-  sourceType: z.enum(['primary', 'secondary'])
-});
-
-const assessmentSchema = z.object({
-  status: z.enum(['supported', 'partial', 'unsupported', 'unknown']),
-  confidence: z.enum(['high', 'medium', 'low']),
-  summary: z.string(),
-  risks: z.array(z.string()).max(5),
-  evidence: z.array(evidenceItemSchema).max(5)
-});
+import { guardrailsSchema, normalizeIsoDate } from './reportSchema.js';
 
 const enterpriseReadinessSchema = z.object({
   companyName: z.string(),
@@ -29,10 +14,7 @@ const enterpriseReadinessSchema = z.object({
   executiveSummary: z.string(),
   recommendation: z.enum(['green', 'yellow', 'red']),
   deploymentVerdict: z.string(),
-  guardrails: z.object({
-    euDataResidency: assessmentSchema,
-    enterpriseDeployment: assessmentSchema
-  }),
+  guardrails: guardrailsSchema,
   unansweredQuestions: z.array(z.string()).max(6),
   nextSteps: z.array(z.string()).max(6)
 });
@@ -80,16 +62,6 @@ function normalizeReport(
     unansweredQuestions: report.unansweredQuestions.filter(Boolean),
     nextSteps: report.nextSteps.filter(Boolean)
   };
-}
-
-function normalizeIsoDate(value: string) {
-  const parsed = new Date(value);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return new Date().toISOString();
-  }
-
-  return parsed.toISOString();
 }
 
 function validateCoverage(report: StructuredReadinessReport) {

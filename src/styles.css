@@ -505,6 +505,37 @@ input {
   padding: 1rem 1.1rem;
 }
 
+.composer-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+.composer-preset {
+  border: 1px solid rgba(188, 216, 255, 0.16);
+  background:
+    linear-gradient(180deg, rgba(135, 207, 255, 0.08), rgba(255, 255, 255, 0.03));
+  color: #eff6ff;
+  padding: 0.58rem 0.9rem;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.composer-preset:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(135, 207, 255, 0.32);
+  background:
+    linear-gradient(180deg, rgba(135, 207, 255, 0.16), rgba(255, 255, 255, 0.05));
+}
+
+.composer-preset:disabled {
+  opacity: 0.48;
+  cursor: wait;
+}
+
 .composer-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
