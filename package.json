@@ -7,6 +7,7 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite --host 0.0.0.0",
     "dev:server": "tsx watch server/index.ts",
+    "db:migrate": "node --import tsx server/db/migrate.ts",
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist-server/server/index.js",
     "test:server": "node --import tsx --test server/**/*.test.ts"
@@ -17,6 +18,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "openai": "^5.12.2",
+    "pg": "^8.20.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "zod": "^3.25.76"
@@ -25,6 +27,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/node": "^24.6.0",
+    "@types/pg": "^8.20.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.0.4",

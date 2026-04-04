@@ -15,6 +15,7 @@ import {
   researchCompany
 } from './researchAgent.js';
 import { createMockReport } from './mockReport.js';
+import { checkDatabaseHealth } from './db/client.js';
 import type {
   ResearchProgressUpdate,
   ResearchRequest,
@@ -33,14 +34,17 @@ app.use(
 );
 app.use(express.json({ limit: '1mb' }));
 
-app.get('/api/health', (_req, res) => {
+app.get('/api/health', async (_req, res) => {
+  const database = await checkDatabaseHealth();
+
   res.json({
-    ok: true
+    ok: true,
+    database
   });
 });
 
 app.post('/api/chat/test', (req, res) => {
-  const normalizedCompanyName = getNormalizedCompanyName(req);
+  const { companyName: normalizedCompanyName } = getResearchRequestData(req);
 
   const response: ResearchResponse = {
     mode: 'test',
@@ -51,14 +55,16 @@ app.post('/api/chat/test', (req, res) => {
 });
 
 app.post('/api/chat', async (req, res) => {
-  const normalizedCompanyName = requireResearchTarget(req, res);
+  const researchTarget = requireResearchTarget(req, res);
 
-  if (!normalizedCompanyName) {
+  if (!researchTarget) {
     return;
   }
 
   try {
-    const report = await researchCompany(normalizedCompanyName);
+    const report = await researchCompany(researchTarget.companyName, {
+      forceRefresh: researchTarget.refresh
+    });
     const response: ResearchResponse = { mode: 'live', report };
 
     res.json(response);
@@ -76,9 +82,9 @@ app.post('/api/chat', async (req, res) => {
 });
 
 app.post('/api/chat/stream', async (req, res) => {
-  const normalizedCompanyName = requireResearchTarget(req, res);
+  const researchTarget = requireResearchTarget(req, res);
 
-  if (!normalizedCompanyName) {
+  if (!researchTarget) {
     return;
   }
 
@@ -107,9 +113,12 @@ app.post('/api/chat/stream', async (req, res) => {
 
   try {
     const report = await researchCompany(
-      normalizedCompanyName,
-      (update: ResearchProgressUpdate) => {
-        sendEvent('progress', update);
+      researchTarget.companyName,
+      {
+        forceRefresh: researchTarget.refresh,
+        onProgress: (update: ResearchProgressUpdate) => {
+          sendEvent('progress', update);
+        }
       }
     );
 
@@ -134,24 +143,27 @@ app.post('/api/chat/stream', async (req, res) => {
   }
 });
 
-function getNormalizedCompanyName(req: express.Request) {
-  const { companyName } = (req.body ?? {}) as Partial<ResearchRequest>;
+function getResearchRequestData(req: express.Request) {
+  const { companyName, refresh } = (req.body ?? {}) as Partial<ResearchRequest>;
 
-  return typeof companyName === 'string' ? companyName.trim() : '';
+  return {
+    companyName: typeof companyName === 'string' ? companyName.trim() : '',
+    refresh: refresh === true
+  };
 }
 
 function requireResearchTarget(req: express.Request, res: express.Response) {
-  const normalizedCompanyName = getNormalizedCompanyName(req);
+  const normalizedRequest = getResearchRequestData(req);
 
-  if (normalizedCompanyName.length >= 2) {
-    return normalizedCompanyName;
+  if (normalizedRequest.companyName.length >= 2) {
+    return normalizedRequest;
   }
 
   res.status(400).json({
     error: 'Enter a company or product name to research.'
   });
 
-  return '';
+  return null;
 }
 
 function formatResearchError(error: unknown) {

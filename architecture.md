@@ -23,6 +23,8 @@ The solution is implemented as a single web application with:
 - a React single-page frontend
 - a Node.js + Express backend
 - a staged OpenAI Agents SDK workflow for intake, retrieval, decisioning, and presentation
+- a Postgres-backed server-side cache for vendor resolutions, accepted report snapshots, and evidence metadata
+- a stale-while-revalidate refresh pattern for cache hits
 - browser-local conversation history persisted in `localStorage`
 
 The current production shape is a single deployable web service that can serve both:
@@ -64,6 +66,7 @@ flowchart TB
     A6["Structured decisioning"]
     A7["Report presentation"]
     A8["Test mode report generator"]
+    A9["Cache repository and promotion policy"]
   end
 
   subgraph D["Data Architecture"]
@@ -74,6 +77,9 @@ flowchart TB
     D5["EnterpriseReadinessReport"]
     D6["ConversationState"]
     D7["Structured research logs"]
+    D8["Subject resolution cache"]
+    D9["Evidence bundles and evidence items"]
+    D10["Decision snapshots"]
   end
 
   subgraph T["Technology Architecture"]
@@ -83,6 +89,7 @@ flowchart TB
     T4["Hosted web search"]
     T5["Vendor-controlled public web"]
     T6["Vite / TypeScript toolchain"]
+    T7["Postgres"]
   end
 
   B3 --> B1 --> B2
@@ -91,6 +98,7 @@ flowchart TB
   A1 --> A2 --> A3
   A3 --> A4 --> A5 --> A6 --> A7
   A2 --> A8
+  A3 --> A9
 
   A2 -. receives .-> D1
   A4 -. produces .-> D2
@@ -99,10 +107,14 @@ flowchart TB
   A7 -. produces .-> D5
   A1 -. persists .-> D6
   A3 -. emits .-> D7
+  A9 -. persists .-> D8
+  A9 -. persists .-> D9
+  A9 -. persists .-> D10
 
   T1 --> A1
   T2 --> A2
   T2 --> A3
+  T2 --> A9
   T3 --> A4
   T3 --> A5
   T3 --> A6
@@ -110,6 +122,7 @@ flowchart TB
   T5 --> T4
   T6 --> A1
   T6 --> A2
+  T7 --> A9
 ```
 
 ## 3. Business Architecture
@@ -129,6 +142,7 @@ The business goal is to reduce procurement risk when evaluating third-party soft
 | Analyst Workflow Visibility | Show the user what stage the research is in | Streamed progress over SSE |
 | Conversation Recall | Re-open previous reviews in the same browser | Sidebar backed by `localStorage` |
 | UI Validation Mode | Validate UX without paying live research latency | Mock report path via `/api/chat/test` |
+| Evidence Continuity | Reuse accepted research and improve it when better evidence appears | Postgres cache plus background refresh |
 
 ### 3.3 Business Actors
 
@@ -175,6 +189,9 @@ flowchart LR
 | Retrieval Service | Uses hosted web search to assemble product context and an evidence memo | [server/research/retrieval.ts](server/research/retrieval.ts) |
 | Decision Service | Converts memo into a structured security decision | [server/research/decisioning.ts](server/research/decisioning.ts) |
 | Presentation Service | Converts decision into the final report contract, including the “What this product does” section | [server/research/presentation.ts](server/research/presentation.ts) |
+| Cache Policy Service | Decides whether a refreshed candidate can replace the current accepted baseline | [server/research/cachePolicy.ts](server/research/cachePolicy.ts) |
+| Research Cache Repository | Stores subject resolutions, evidence bundles, and decision snapshots | [server/db/researchCacheRepository.ts](server/db/researchCacheRepository.ts) |
+| Database Infrastructure | Opens pooled Postgres connections and applies migrations | [server/db/client.ts](server/db/client.ts), [server/db/migrate.ts](server/db/migrate.ts) |
 | Test Mode Generator | Returns a deterministic mock report | [server/mockReport.ts](server/mockReport.ts) |
 | Logging Utility | Emits structured JSON logs for observability | [server/research/logging.ts](server/research/logging.ts) |
 
@@ -190,14 +207,17 @@ flowchart LR
   API --> MOCK["Mock Report Generator"]
 
   ORCH --> INTAKE["Vendor Intake"]
+  ORCH --> CACHE["Research Cache Repository"]
   ORCH --> RETRIEVE["Evidence Retrieval"]
   ORCH --> DECIDE["Structured Decisioning"]
   ORCH --> PRESENT["Report Presentation"]
+  ORCH --> POLICY["Cache Promotion Policy"]
   ORCH --> LOG["Structured Logging"]
 
   INTAKE --> OPENAI["OpenAI Agents SDK"]
   RETRIEVE --> OPENAI
   DECIDE --> OPENAI
+  CACHE --> DB["Postgres"]
 ```
 
 ### 4.3 Runtime Sequence View
@@ -209,10 +229,12 @@ sequenceDiagram
   participant API as Express API
   participant Orch as Research Orchestrator
   participant Intake as Vendor Intake
+  participant Cache as Research Cache Repository
   participant Retrieve as Retrieval
   participant OpenAI as OpenAI Platform
   participant Decide as Decisioning
   participant Present as Presentation
+  participant DB as Postgres
   participant Store as Browser localStorage
 
   User->>UI: Enter vendor or click starter option
@@ -221,18 +243,39 @@ sequenceDiagram
   Orch->>Intake: validateVendorInput()
   Intake->>OpenAI: Resolve canonical vendor identity
   OpenAI-->>Intake: canonicalName + officialDomains
-  Orch->>Retrieve: generateResearchMemo()
-  Retrieve->>OpenAI: Agent run with webSearchTool
-  OpenAI-->>Retrieve: Streamed tool and text events
-  Retrieve-->>API: Progress stages
-  OpenAI-->>Retrieve: Product context + evidence memo
-  Orch->>Decide: buildDecisionFromMemo()
-  Decide->>OpenAI: Structured decision request
-  OpenAI-->>Decide: Structured ResearchDecision with product context
-  Orch->>Present: presentDecision()
-  Present-->>API: EnterpriseReadinessReport
-  API-->>UI: SSE result event
-  UI->>Store: Persist conversation state
+  Orch->>Cache: loadAcceptedReportSnapshot(canonicalSubjectKey)
+  Cache->>DB: read accepted bundle + decision snapshot
+  alt accepted cache hit
+    DB-->>Cache: accepted report snapshot
+    Cache-->>Orch: cached report
+    Orch-->>API: cached report
+    API-->>UI: SSE result event
+    UI->>Store: Persist conversation state
+    Orch->>Retrieve: background refresh (stale-while-revalidate)
+    Retrieve->>OpenAI: Agent run with webSearchTool
+    OpenAI-->>Retrieve: Refreshed memo
+    Orch->>Decide: buildDecisionFromMemo()
+    Decide->>OpenAI: Structured decision request
+    OpenAI-->>Decide: Structured ResearchDecision
+    Orch->>Present: presentDecision()
+    Orch->>Cache: compare candidate vs accepted baseline
+    Cache->>DB: persist weak/accepted candidate and renew or replace baseline
+  else cache miss
+    Orch->>Retrieve: generateResearchMemo()
+    Retrieve->>OpenAI: Agent run with webSearchTool
+    OpenAI-->>Retrieve: Streamed tool and text events
+    Retrieve-->>API: Progress stages
+    OpenAI-->>Retrieve: Product context + evidence memo
+    Orch->>Decide: buildDecisionFromMemo()
+    Decide->>OpenAI: Structured decision request
+    OpenAI-->>Decide: Structured ResearchDecision with product context
+    Orch->>Present: presentDecision()
+    Orch->>Cache: evaluate candidate and persist artifacts
+    Cache->>DB: write resolution, evidence bundle, evidence items, decision snapshot
+    Present-->>API: EnterpriseReadinessReport
+    API-->>UI: SSE result event
+    UI->>Store: Persist conversation state
+  end
 ```
 
 ### 4.4 Frontend Responsibilities
@@ -270,6 +313,14 @@ This separation is important because it:
 - reduces dependence on free-form parsing
 - makes failures diagnosable by stage
 
+This staged flow is now wrapped by a server-side caching shell:
+
+1. resolve canonical subject
+2. check for a fresh accepted report snapshot by canonical subject key
+3. return cached immediately when present
+4. start a background refresh on cache hits
+5. compare the refreshed candidate to the accepted baseline before promotion
+
 ## 5. Data Architecture
 
 ### 5.1 Core Information Objects
@@ -277,34 +328,45 @@ This separation is important because it:
 | Data Object | Description | Lifecycle |
 |---|---|---|
 | `ResearchRequest` | Raw user request containing `companyName` | API input only |
-| `VendorResolution` | Canonical vendor identity plus allowed domains | Ephemeral backend object |
-| Research memo | Semi-structured narrative including product context and guardrail evidence | Ephemeral backend object |
+| `VendorResolution` | Canonical vendor identity plus allowed domains | Ephemeral backend object and cached server-side |
+| Research memo | Semi-structured narrative including product context and guardrail evidence | Ephemeral backend object and cached server-side with the bundle |
 | `ResearchDecision` | Structured decision with guardrail assessments | Ephemeral backend object |
-| `EnterpriseReadinessReport` | Final UI-facing report, including “What this product does” | Returned to client and persisted in browser messages |
+| `EnterpriseReadinessReport` | Final UI-facing report, including “What this product does” | Returned to client, persisted in browser messages, and cached server-side |
 | `ConversationState` | Browser-local history of threads and messages | Persistent in browser `localStorage` |
 | Structured research log event | Stage-level operational trace | Persistent only in stdout / platform logs |
+| Subject resolution cache | Maps normalized user inputs to canonical vendor resolution | Persistent in Postgres |
+| Evidence bundle | Cached memo plus evidence metadata and bundle status (`accepted`, `weak`, `stale`) | Persistent in Postgres |
+| Decision snapshot | Cached final presented report for an accepted or weak bundle | Persistent in Postgres |
 
 ### 5.2 Data Flow View
 
 ```mermaid
 flowchart LR
   RQ["ResearchRequest"] --> VR["VendorResolution"]
+  VR --> SRC["Subject resolution cache"]
   VR --> RM["Research memo"]
   RM --> RD["ResearchDecision"]
   RD --> RP["EnterpriseReadinessReport"]
+  RM --> EB["Evidence bundle"]
+  RP --> DS["Decision snapshot"]
+  EB --> DS
   RP --> CS["ConversationState in localStorage"]
   VR --> LG["Structured log events"]
   RM --> LG
   RD --> LG
+  EB --> LG
+  DS --> LG
 ```
 
 ### 5.3 Data Management Characteristics
 
-- The server has no database.
-- The backend keeps request-stage data in memory only for the lifetime of a request.
+- The server now uses Postgres for durable caching of subject resolutions, accepted report snapshots, and evidence metadata.
+- The backend still keeps stage-local working data in memory for the lifetime of a request.
 - The browser stores conversation history per mode in `localStorage`.
 - The public report contract is stable and typed in [shared/contracts.ts](shared/contracts.ts).
 - Internal stage objects are stricter than the UI contract and use Zod for normalization.
+- Accepted report caching is keyed by canonical subject, not the raw typed string.
+- Background refresh uses a stale-while-revalidate pattern and only promotes candidates that meet minimum coverage and anti-regression rules.
 
 ### 5.4 Data Governance Rules
 
@@ -325,6 +387,8 @@ flowchart LR
 | Server runtime | Node.js, Express 4, TypeScript |
 | Dev runtime | `tsx watch`, `concurrently` |
 | AI integration | `@openai/agents`, `openai` |
+| Persistence | Postgres, `pg` |
+| Local data services | Docker Compose Postgres helper |
 | Validation | Zod |
 | Observability | Structured JSON logs to stdout |
 
@@ -343,10 +407,16 @@ flowchart LR
   subgraph S["Application Boundary"]
     API["Express server"]
     ORCH["Research orchestrator"]
+    CACHE["Cache repository + promotion policy"]
     LOG["Structured logs"]
     SPA <-->|HTTPS / SSE| API
     API --> ORCH
+    ORCH --> CACHE
     ORCH --> LOG
+  end
+
+  subgraph P["Persistence Boundary"]
+    DB["Postgres"]
   end
 
   subgraph A["External AI Boundary"]
@@ -359,8 +429,10 @@ flowchart LR
   end
 
   ORCH --> OAI
+  ORCH --> DB
   OAI --> WS
   WS --> WEB
+  CACHE --> DB
 ```
 
 ### 6.3 Runtime Modes
@@ -379,6 +451,10 @@ flowchart LR
 | `OPENAI_API_KEY` | Required for live research |
 | `OPENAI_MODEL` | Optional override for model selection |
 | `RESEARCH_TIMEOUT_MS` | Optional live request budget |
+| `DATABASE_URL` | Postgres connection string for server-side caching |
+| `EVIDENCE_CACHE_TTL_MS` | TTL for accepted and weak evidence bundles |
+| `RESOLUTION_CACHE_TTL_MS` | TTL for cached vendor resolutions |
+| `BACKGROUND_REFRESH_COOLDOWN_MS` | Minimum interval between background refreshes for the same canonical subject |
 | `PORT` | HTTP listening port |
 
 ## 7. Security and Trust Boundaries
@@ -409,15 +485,18 @@ The system explicitly treats the following as untrusted:
 | Structured decision output | Reduce memo parsing fragility | `rawResearchDecisionSchema` and normalization in [server/research/decisioning.ts](server/research/decisioning.ts) |
 | Coverage validation | Reject thin or incomplete report outputs | `validateCoverage()` in [server/research/presentation.ts](server/research/presentation.ts) |
 | Request time budgeting | Bound runtime and user wait | `RESEARCH_TIMEOUT_MS` handling in [server/researchAgent.ts](server/researchAgent.ts) |
+| Canonical-subject cache keys | Avoid split caches for spelling variants and aliases | `normalizeSubjectCacheKey()` and canonical-name lookup in [server/db/researchCacheRepository.ts](server/db/researchCacheRepository.ts) |
+| Cache promotion policy | Prevent weaker refreshes from replacing accepted baselines | [server/research/cachePolicy.ts](server/research/cachePolicy.ts) |
+| Stale-while-revalidate refresh | Keep user latency low while allowing evidence improvement over time | background refresh scheduling in [server/researchAgent.ts](server/researchAgent.ts) |
 | Structured logs | Support diagnostics by phase | [server/research/logging.ts](server/research/logging.ts) |
 
 ### 7.3 Current Security Limitations
 
 - No authentication or authorization layer
 - No tenant isolation because there is no server-side user model
-- No encrypted server-side persistence because there is no database
+- No explicit encryption-at-rest policy described at the application level; relies on managed Postgres/runtime controls
 - Browser `localStorage` history is device-local and not centrally governed
-- No server-side cache or evidence repository
+- Background refresh is in-process, not queue-backed, so it is still tied to a single app instance
 - No external policy engine for enterprise control rules
 
 ## 8. Architecture Decisions
@@ -431,6 +510,9 @@ The system explicitly treats the following as untrusted:
 | Keep browser-local history | Fast MVP without a database | No cross-device sync |
 | Keep test mode in the same app | Enables rapid UI validation | Requires clear separation from live mode |
 | Use official-domain filtering | Improves evidence quality and safety | Can miss evidence if the resolved domain set is incomplete |
+| Add Postgres-backed research caching | Stabilizes repeated results and creates a server-side evidence memory | Introduces persistence and migration management |
+| Key accepted reports by canonical subject | Prevents spelling variants from fragmenting the cache | Requires vendor resolution before accepted-report lookup |
+| Use stale-while-revalidate with promotion rules | Improves freshness without exposing random regressions to users | Refresh work is asynchronous and more complex to reason about |
 
 ### 8.2 Architecture Building Blocks vs Solution Building Blocks
 
@@ -441,6 +523,7 @@ The system explicitly treats the following as untrusted:
 | AI-driven evidence acquisition | OpenAI Agents SDK retrieval stage with hosted web search |
 | Security decision service | Decision agent + Zod normalization |
 | Presentation service | Presentation layer producing `EnterpriseReadinessReport` |
+| Evidence continuity capability | Postgres cache repository plus promotion policy |
 | Interaction history | Browser `localStorage` conversation store |
 | Operational telemetry | Structured JSON console logs |
 
@@ -451,6 +534,8 @@ The system explicitly treats the following as untrusted:
 - The dominant latency is external model and search work, not local compute.
 - The UI mitigates latency with streamed progress stages.
 - Test mode provides a near-instant UX fallback for demo and validation scenarios.
+- Accepted cache hits are now near-instant compared with live research.
+- Background refresh shifts freshness work off the critical request path.
 
 ### 9.2 Reliability
 
@@ -458,10 +543,12 @@ The system explicitly treats the following as untrusted:
 - Retrieval can retry once on retryable model failures.
 - Decision output is normalized and repaired when the model returns malformed JSON.
 - The system returns specific user-facing error classes for common failure modes.
+- Accepted baselines are retained when a refreshed candidate is weaker or thinner.
 
 ### 9.3 Testability
 
 - The backend has stage-level tests for intake, retrieval, decisioning, presentation, and logging.
+- The backend now also has explicit cache-promotion policy tests.
 - Shared report structures reduce drift between stages.
 - The application contract is centralized in [shared/contracts.ts](shared/contracts.ts).
 
@@ -469,7 +556,7 @@ The system explicitly treats the following as untrusted:
 
 - The staged architecture is easier to reason about than a single large agent.
 - The current codebase has a clear module boundary for each backend concern.
-- The remaining maintenance hotspots are mostly around future scaling rather than current code structure.
+- The current maintenance hotspot is now around distributed background refresh and eventual worker separation, not cache correctness.
 
 ## 10. Gap Assessment and Target-State Considerations
 
@@ -487,9 +574,9 @@ From a TOGAF perspective, the current solution is a strong MVP architecture but 
 | Domain | Gap | Impact |
 |---|---|---|
 | Business | No multi-user workflow, approvals, or policy ownership model | Limits enterprise operating model |
-| Data | No durable central persistence or analytics store | No shared history, audit trail, or reporting |
-| Application | No caching, queueing, or background job architecture | Long requests remain synchronous |
-| Technology | Single-node deployment model | Limited horizontal scale and resilience |
+| Data | No full analytical evidence warehouse or user-facing audit UI | Limited historical reporting and governance workflows |
+| Application | Background refresh is in-process rather than queue-backed | Refresh reliability is tied to a single app instance |
+| Technology | Single-node refresh scheduler and web-service-only runtime | Limited horizontal scale and resilience |
 | Security | No auth, RBAC, or tenant isolation | Not suitable for broad internal rollout yet |
 
 ### 10.3 Logical Next Architecture Increment
@@ -498,8 +585,8 @@ The most natural next-state architecture would add:
 
 - authenticated users
 - server-side persistent conversation and evidence storage
-- background research jobs with polling or event updates
-- vendor result caching
+- queue-backed background research jobs with polling or event updates
+- richer evidence-bundle comparison and audit views
 - administrative policy configuration for additional guardrails
 - centralized monitoring and log aggregation
 
@@ -508,14 +595,15 @@ The most natural next-state architecture would add:
 From a TOGAF viewpoint, `ArchReviewAgent` is currently a layered digital solution with:
 
 - a clear business capability for third-party security review
-- a modular application architecture centered on a four-stage research pipeline
-- a deliberately constrained data architecture with typed artifacts and browser-local persistence
-- a lightweight technology architecture optimized for a single deployable web service
+- a modular application architecture centered on a four-stage research pipeline wrapped by a cache-and-refresh shell
+- a data architecture with typed artifacts, browser-local history, and Postgres-backed accepted evidence/report caching
+- a lightweight technology architecture optimized for a single deployable web service plus managed Postgres
 
 Its strongest architectural qualities are:
 
 - staged decomposition
 - evidence-focused decisioning
+- canonical-subject caching with anti-regression promotion rules
 - explicit trust-boundary controls
 - strong contract discipline between layers
 
