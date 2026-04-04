@@ -28,6 +28,7 @@ Requirements:
 - do not browse the web for this step; use existing model knowledge only
 - interpret the identifier in an enterprise software procurement context
 - if a widely known software or SaaS vendor is the obvious fit for the identifier, prefer that vendor over niche non-software entities
+- if the identifier names a specific product, platform, or sub-brand under a larger software vendor, preserve that named subject rather than collapsing it to the parent company
 - correct obvious spelling mistakes when confidence is high
 - identify only first-party vendor-controlled domains
 - include official documentation/help/trust subdomains when they are vendor-controlled

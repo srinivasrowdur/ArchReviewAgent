@@ -17,6 +17,7 @@ test('generateResearchMemo assembles streamed text and emits ordered progress st
   const seenStages: string[] = [];
 
   const memo = await generateResearchMemo(
+    'Grammarly',
     resolution,
     Date.now(),
     30_000,
@@ -44,6 +45,7 @@ test('generateResearchMemo assembles streamed text and emits ordered progress st
 
 test('generateResearchMemo salvages partial memo on retryable stream error', async () => {
   const memo = await generateResearchMemo(
+    'Grammarly',
     resolution,
     Date.now(),
     30_000,
@@ -66,6 +68,7 @@ test('generateResearchMemo maps abort-like failures to ResearchTimeoutError', as
   await assert.rejects(
     () =>
       generateResearchMemo(
+        'Grammarly',
         resolution,
         Date.now(),
         30_000,
