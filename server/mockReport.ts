@@ -12,7 +12,7 @@ export function createMockReport(companyName: string): EnterpriseReadinessReport
     companyName: normalizedCompanyName,
     researchedAt: new Date().toISOString(),
     overview:
-      `Test mode sample for ${normalizedCompanyName}. This report is mocked so you can verify the chat flow, card layout, evidence rendering, and error-free round trip without waiting for deep web research.`,
+      `${normalizedCompanyName} is represented here as a software product used by enterprise teams. This mocked section stands in for the live "What this product does" summary that would normally be grounded in vendor-controlled product pages.`,
     executiveSummary:
       `${normalizedCompanyName} is shown here as a yellow security-review candidate in test mode. The sample report simulates partial EU residency support and usable enterprise controls so you can validate the UI and API behavior before using the live research path.`,
     recommendation: 'yellow',

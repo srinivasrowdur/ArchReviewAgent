@@ -16,6 +16,8 @@ It also includes cross-cutting security controls, runtime flow diagrams, and a p
 - EU data residency
 - Enterprise deployment
 
+Alongside the guardrail verdict, the system also produces a short factual product-context summary that explains what the vendor or product actually does.
+
 The solution is implemented as a single web application with:
 
 - a React single-page frontend
@@ -31,7 +33,7 @@ The current production shape is a single deployable web service that can serve b
 The key architectural choice is separation of concerns in the backend pipeline:
 
 1. Vendor intake and normalization
-2. Evidence retrieval
+2. Vendor context and evidence retrieval
 3. Structured decisioning
 4. Final report presentation
 
@@ -48,7 +50,7 @@ This is materially better than a single free-form agent because it improves:
 flowchart TB
   subgraph B["Business Architecture"]
     B1["Capability: Third-party security review"]
-    B2["Outcome: Enterprise readiness recommendation"]
+    B2["Outcome: Product context plus enterprise readiness recommendation"]
     B3["Actor: Analyst / procurement user"]
     B4["Policy focus: EU residency and deployment guardrails"]
   end
@@ -58,7 +60,7 @@ flowchart TB
     A2["Express API facade"]
     A3["Research orchestrator"]
     A4["Vendor intake"]
-    A5["Evidence retrieval"]
+    A5["Vendor context and evidence retrieval"]
     A6["Structured decisioning"]
     A7["Report presentation"]
     A8["Test mode report generator"]
@@ -67,7 +69,7 @@ flowchart TB
   subgraph D["Data Architecture"]
     D1["ResearchRequest"]
     D2["VendorResolution"]
-    D3["Research memo"]
+    D3["Research memo with product context"]
     D4["ResearchDecision"]
     D5["EnterpriseReadinessReport"]
     D6["ConversationState"]
@@ -121,6 +123,7 @@ The business goal is to reduce procurement risk when evaluating third-party soft
 | Capability | Description | Current Implementation |
 |---|---|---|
 | Vendor Intake | Accept a vendor or product name and normalize the request | Frontend composer plus backend intake validation |
+| Product Contextualization | Explain what the product or company does before showing the security verdict | Retrieval memo plus report overview section |
 | Security Review | Evaluate a vendor against enterprise guardrails | Live research pipeline using OpenAI Agents SDK |
 | Evidence-based Recommendation | Convert vendor evidence into a decision with confidence | Structured decisioning plus report presentation |
 | Analyst Workflow Visibility | Show the user what stage the research is in | Streamed progress over SSE |
@@ -142,10 +145,11 @@ The business goal is to reduce procurement risk when evaluating third-party soft
 flowchart LR
   U["Analyst"] --> P1["Submit vendor name"]
   P1 --> P2["Resolve vendor identity"]
-  P2 --> P3["Search official vendor evidence"]
-  P3 --> P4["Evaluate EU residency and deployment"]
-  P4 --> P5["Produce recommendation and confidence"]
-  P5 --> P6["Persist conversation in browser history"]
+  P2 --> P3["Establish what the product does"]
+  P3 --> P4["Search official vendor evidence"]
+  P4 --> P5["Evaluate EU residency and deployment"]
+  P5 --> P6["Produce product context, recommendation, and confidence"]
+  P6 --> P7["Persist conversation in browser history"]
 ```
 
 ### 3.5 Business Rules
@@ -154,6 +158,7 @@ flowchart LR
 - `unknown` should only be used when the evidence is genuinely too thin.
 - Vendor evidence should come from official vendor-controlled domains.
 - EU transfer-law language is not equivalent to EU residency support.
+- Product context should be factual and grounded in vendor-controlled descriptions, not marketing paraphrase.
 - The system should expose evidence and unanswered questions, not only a color verdict.
 
 ## 4. Application Architecture
@@ -167,9 +172,9 @@ flowchart LR
 | API Facade | Exposes health, test, sync, and stream endpoints | [server/index.ts](server/index.ts) |
 | Research Orchestrator | Coordinates the four backend stages and structured logging | [server/researchAgent.ts](server/researchAgent.ts) |
 | Vendor Intake Service | Validates input and resolves canonical vendor identity | [server/research/vendorIntake.ts](server/research/vendorIntake.ts) |
-| Retrieval Service | Uses hosted web search to assemble an evidence memo | [server/research/retrieval.ts](server/research/retrieval.ts) |
+| Retrieval Service | Uses hosted web search to assemble product context and an evidence memo | [server/research/retrieval.ts](server/research/retrieval.ts) |
 | Decision Service | Converts memo into a structured security decision | [server/research/decisioning.ts](server/research/decisioning.ts) |
-| Presentation Service | Converts decision into the final report contract | [server/research/presentation.ts](server/research/presentation.ts) |
+| Presentation Service | Converts decision into the final report contract, including the “What this product does” section | [server/research/presentation.ts](server/research/presentation.ts) |
 | Test Mode Generator | Returns a deterministic mock report | [server/mockReport.ts](server/mockReport.ts) |
 | Logging Utility | Emits structured JSON logs for observability | [server/research/logging.ts](server/research/logging.ts) |
 
@@ -220,10 +225,10 @@ sequenceDiagram
   Retrieve->>OpenAI: Agent run with webSearchTool
   OpenAI-->>Retrieve: Streamed tool and text events
   Retrieve-->>API: Progress stages
-  OpenAI-->>Retrieve: Evidence memo
+  OpenAI-->>Retrieve: Product context + evidence memo
   Orch->>Decide: buildDecisionFromMemo()
   Decide->>OpenAI: Structured decision request
-  OpenAI-->>Decide: Structured ResearchDecision
+  OpenAI-->>Decide: Structured ResearchDecision with product context
   Orch->>Present: presentDecision()
   Present-->>API: EnterpriseReadinessReport
   API-->>UI: SSE result event
@@ -235,6 +240,7 @@ sequenceDiagram
 The frontend is a single React screen with four primary responsibilities:
 
 - collect the target vendor name
+- display what the product does before the security verdict
 - display live research progress
 - render the final structured report
 - persist and restore conversation history in the current browser
@@ -272,9 +278,9 @@ This separation is important because it:
 |---|---|---|
 | `ResearchRequest` | Raw user request containing `companyName` | API input only |
 | `VendorResolution` | Canonical vendor identity plus allowed domains | Ephemeral backend object |
-| Research memo | Semi-structured narrative evidence summary | Ephemeral backend object |
+| Research memo | Semi-structured narrative including product context and guardrail evidence | Ephemeral backend object |
 | `ResearchDecision` | Structured decision with guardrail assessments | Ephemeral backend object |
-| `EnterpriseReadinessReport` | Final UI-facing report | Returned to client and persisted in browser messages |
+| `EnterpriseReadinessReport` | Final UI-facing report, including “What this product does” | Returned to client and persisted in browser messages |
 | `ConversationState` | Browser-local history of threads and messages | Persistent in browser `localStorage` |
 | Structured research log event | Stage-level operational trace | Persistent only in stdout / platform logs |
 
@@ -431,6 +437,7 @@ The system explicitly treats the following as untrusted:
 | TOGAF ABB | Current SBB |
 |---|---|
 | Vendor review capability | React chat workspace + Express endpoints |
+| Product contextualization capability | Retrieval stage plus report overview rendering |
 | AI-driven evidence acquisition | OpenAI Agents SDK retrieval stage with hosted web search |
 | Security decision service | Decision agent + Zod normalization |
 | Presentation service | Presentation layer producing `EnterpriseReadinessReport` |

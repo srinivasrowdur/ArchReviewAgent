@@ -215,6 +215,61 @@ test('buildDecisionFromMemo downgrades optimistic recommendations when normalize
   assert.equal(decision.recommendation, 'yellow');
 });
 
+test('buildDecisionFromMemo derives product context from the memo section when vendorOverview is absent', async () => {
+  const memo = `
+Vendor
+Miro
+What this product does
+Miro is a collaborative online whiteboard platform used for workshops, diagrams, and product planning across distributed teams.
+EU data residency
+EU data region support is documented for enterprise plans.
+Enterprise deployment
+SAML SSO and SCIM are documented.
+Preliminary verdict
+Miro shows usable enterprise controls with a documented EU data region option.
+`.trim();
+
+  const decision = await buildDecisionFromMemo(
+    'Miro',
+    memo,
+    {
+      canonicalName: 'Miro',
+      officialDomains: ['miro.com'],
+      confidence: 'high',
+      alternatives: [],
+      rationale: 'Resolved to Miro.'
+    },
+    Date.now(),
+    30_000,
+    async () => ({
+      finalOutput: {
+        companyName: 'Miro',
+        researchedAt: new Date('2026-04-03T10:00:00Z').toISOString(),
+        recommendation: 'green',
+        guardrails: {
+          euDataResidency: {
+            status: 'supported',
+            confidence: 'high',
+            summary: 'EU data region support is documented.',
+            risks: [],
+            evidence: []
+          },
+          enterpriseDeployment: {
+            status: 'supported',
+            confidence: 'medium',
+            summary: 'Enterprise controls are documented.',
+            risks: [],
+            evidence: []
+          }
+        },
+        unansweredQuestions: []
+      }
+    })
+  );
+
+  assert.match(decision.vendorOverview, /collaborative online whiteboard platform/i);
+});
+
 test('buildDecisionFromMemo truncates oversized evidence fields instead of rejecting the decision', async () => {
   const longFinding =
     'Microsoft documents regional deployment controls for Fabric workloads and related data services, but the evidence summary returned by the model is intentionally verbose here so it exceeds the downstream presentation limit and exercises raw-schema tolerance before normalization.'.repeat(
@@ -272,6 +327,66 @@ test('buildDecisionFromMemo truncates oversized evidence fields instead of rejec
   assert.equal(decision.guardrails.euDataResidency.evidence.length, 1);
   assert.ok(decision.guardrails.euDataResidency.evidence[0]);
   assert.ok(decision.guardrails.euDataResidency.evidence[0]!.finding.length <= 220);
+});
+
+test('buildDecisionFromMemo preserves a product subject when the resolved owner is broader', async () => {
+  const memo = `
+Vendor
+Microsoft
+What this product does
+Microsoft Fabric is a unified analytics platform that combines data engineering, data integration, real-time analytics, and business intelligence workloads.
+EU data residency
+Fabric supports deployment in European regions through Microsoft-managed regional services.
+Enterprise deployment
+Fabric integrates with enterprise identity, admin, and governance controls.
+Preliminary verdict
+Microsoft Fabric appears enterprise-ready with documented European region support and enterprise controls.
+`.trim();
+
+  const decision = await buildDecisionFromMemo(
+    'Microsoft Fabric',
+    memo,
+    {
+      canonicalName: 'Microsoft',
+      officialDomains: ['microsoft.com', 'fabric.microsoft.com', 'learn.microsoft.com'],
+      confidence: 'high',
+      alternatives: [],
+      rationale: 'Resolved to Microsoft.'
+    },
+    Date.now(),
+    30_000,
+    async () => ({
+      finalOutput: {
+        companyName: 'Microsoft',
+        researchedAt: new Date('2026-04-03T10:00:00Z').toISOString(),
+        vendorOverview:
+          'Microsoft is an enterprise technology vendor offering cloud, productivity, and security services.',
+        preliminaryVerdict:
+          'Microsoft Fabric appears enterprise-ready with documented European region support and enterprise controls.',
+        recommendation: 'green',
+        guardrails: {
+          euDataResidency: {
+            status: 'supported',
+            confidence: 'high',
+            summary: 'European region support is documented.',
+            risks: [],
+            evidence: []
+          },
+          enterpriseDeployment: {
+            status: 'supported',
+            confidence: 'high',
+            summary: 'Enterprise deployment controls are documented.',
+            risks: [],
+            evidence: []
+          }
+        },
+        unansweredQuestions: []
+      }
+    })
+  );
+
+  assert.equal(decision.companyName, 'Microsoft Fabric');
+  assert.match(decision.vendorOverview, /unified analytics platform/i);
 });
 
 test('buildDecisionFromMemo maps decision-stage budget exhaustion to ResearchTimeoutError', async () => {

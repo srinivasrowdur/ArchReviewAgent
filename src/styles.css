@@ -398,6 +398,10 @@ input {
   margin: 0.4rem 0 0;
 }
 
+.report-overview .section-label {
+  margin-top: 0.75rem;
+}
+
 .guardrail-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }

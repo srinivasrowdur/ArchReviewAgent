@@ -82,8 +82,9 @@ async function runResearchWorkflow(
     });
 
     phase = 'retrieval';
-    memo = await generateResearchMemo(resolution, startedAt, budgetMs, onProgress);
+    memo = await generateResearchMemo(companyName, resolution, startedAt, budgetMs, onProgress);
     logResearchEvent('memo_generated', {
+      subjectName: companyName,
       runId,
       canonicalName: resolution.canonicalName,
       memoLength: memo.length,
@@ -95,7 +96,7 @@ async function runResearchWorkflow(
 
     phase = 'decision';
     decision = await buildDecisionFromMemo(
-      resolution.canonicalName,
+      companyName,
       memo,
       resolution,
       startedAt,
@@ -103,6 +104,7 @@ async function runResearchWorkflow(
     );
     logResearchEvent('decision_built', {
       runId,
+      subjectName: companyName,
       canonicalName: decision.companyName,
       recommendation: decision.recommendation,
       euStatus: decision.guardrails.euDataResidency.status,
@@ -120,6 +122,7 @@ async function runResearchWorkflow(
     const report = presentDecision(decision);
     logResearchEvent('report_presented', {
       runId,
+      subjectName: companyName,
       canonicalName: report.companyName,
       recommendation: report.recommendation,
       euStatus: report.guardrails.euDataResidency.status,

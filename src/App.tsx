@@ -605,6 +605,7 @@ function ReportView({ report }: { report: EnterpriseReadinessReport }) {
 
       <div className="report-overview">
         <h3>{report.companyName}</h3>
+        <p className="section-label">What this product does</p>
         <p>{report.overview}</p>
       </div>
 
