@@ -46,6 +46,11 @@ type PendingAssistantMessage = {
   message: Message;
 };
 
+type SubmitResearchOptions = {
+  appendUserMessage?: boolean;
+  forceRefresh?: boolean;
+};
+
 const initialMessages: Message[] = [
   {
     id: 'welcome',
@@ -166,22 +171,28 @@ export default function App() {
     setCompanyName('');
   }
 
-  async function submitResearch(nextCompany: string) {
+  async function submitResearch(
+    nextCompany: string,
+    options: SubmitResearchOptions = {}
+  ) {
     const activeConversationId = activeConversation.id;
+    const streamedProgressStages: ResearchProgressStage[] = [];
 
     if (!nextCompany || isLoading) {
       return;
     }
 
-    setConversationState((current) =>
-      appendMessagesToConversation(current, activeConversationId, [
-        {
-          id: crypto.randomUUID(),
-          role: 'user',
-          content: nextCompany
-        }
-      ])
-    );
+    if (options.appendUserMessage !== false) {
+      setConversationState((current) =>
+        appendMessagesToConversation(current, activeConversationId, [
+          {
+            id: crypto.randomUUID(),
+            role: 'user',
+            content: nextCompany
+          }
+        ])
+      );
+    }
     setCompanyName('');
     setIsLoading(true);
     setPendingAssistantMessage(null);
@@ -191,8 +202,12 @@ export default function App() {
     try {
       const payload = isTestMode
         ? await requestResearch('/api/chat/test', nextCompany)
-        : await requestStreamedResearch(nextCompany, (update) => {
-            setReportedResearchStage(update.stage);
+        : await requestStreamedResearch(nextCompany, {
+            refresh: options.forceRefresh,
+            onProgress: (update) => {
+              streamedProgressStages.push(update.stage);
+              setReportedResearchStage(update.stage);
+            }
           });
 
       const nextAssistantMessage = {
@@ -202,7 +217,13 @@ export default function App() {
         report: payload.report
       };
 
-      if (isTestMode) {
+      const shouldAppendImmediately =
+        !isTestMode &&
+        (streamedProgressStages.length === 0 ||
+          (streamedProgressStages.length === 1 &&
+            streamedProgressStages[0] === 'finalizing'));
+
+      if (isTestMode || shouldAppendImmediately) {
         startTransition(() => {
           setConversationState((current) =>
             appendMessagesToConversation(current, activeConversationId, [
@@ -248,6 +269,13 @@ export default function App() {
   function handleStarterCompanyClick(company: (typeof starterCompanies)[number]) {
     setCompanyName(company);
     void submitResearch(company);
+  }
+
+  function handleRefreshReport(report: EnterpriseReadinessReport) {
+    void submitResearch(report.companyName, {
+      appendUserMessage: false,
+      forceRefresh: true
+    });
   }
 
   return (
@@ -330,7 +358,13 @@ export default function App() {
         <section className="chat-surface">
           <div className="message-stream" aria-live="polite">
             {messages.map((message) => (
-              <MessageBubble key={message.id} message={message} />
+              <MessageBubble
+                canRefresh={!isTestMode}
+                isLoading={isLoading}
+                key={message.id}
+                message={message}
+                onRefreshReport={handleRefreshReport}
+              />
             ))}
 
             {isLoading ? (
@@ -384,14 +418,19 @@ export default function App() {
   );
 }
 
-async function requestResearch(endpoint: string, companyName: string) {
+async function requestResearch(
+  endpoint: string,
+  companyName: string,
+  options: { refresh?: boolean } = {}
+) {
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      companyName
+      companyName,
+      refresh: options.refresh === true
     })
   });
 
@@ -406,7 +445,10 @@ async function requestResearch(endpoint: string, companyName: string) {
 
 async function requestStreamedResearch(
   companyName: string,
-  onProgress: (update: ResearchProgressUpdate) => void
+  options: {
+    refresh?: boolean;
+    onProgress: (update: ResearchProgressUpdate) => void;
+  }
 ) {
   const response = await fetch('/api/chat/stream', {
     method: 'POST',
@@ -414,7 +456,8 @@ async function requestStreamedResearch(
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      companyName
+      companyName,
+      refresh: options.refresh === true
     })
   });
 
@@ -449,7 +492,7 @@ async function requestStreamedResearch(
         const parsedEvent = parseStreamEvent(rawEvent);
 
         if (parsedEvent.event === 'progress') {
-          onProgress(parsedEvent.data as ResearchProgressUpdate);
+          options.onProgress(parsedEvent.data as ResearchProgressUpdate);
         }
 
         if (parsedEvent.event === 'result') {
@@ -581,7 +624,17 @@ function ConversationListItem({
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({
+  canRefresh,
+  isLoading,
+  message,
+  onRefreshReport
+}: {
+  canRefresh: boolean;
+  isLoading: boolean;
+  message: Message;
+  onRefreshReport: (report: EnterpriseReadinessReport) => void;
+}) {
   return (
     <article
       className={`message ${message.role}${message.isError ? ' error' : ''}`}
@@ -590,17 +643,46 @@ function MessageBubble({ message }: { message: Message }) {
         {message.role === 'assistant' ? 'agent' : 'user'}
       </div>
       <p className="message-copy">{message.content}</p>
-      {message.report ? <ReportView report={message.report} /> : null}
+      {message.report ? (
+        <ReportView
+          canRefresh={canRefresh}
+          isRefreshing={isLoading}
+          onRefresh={() => onRefreshReport(message.report)}
+          report={message.report}
+        />
+      ) : null}
     </article>
   );
 }
 
-function ReportView({ report }: { report: EnterpriseReadinessReport }) {
+function ReportView({
+  canRefresh,
+  isRefreshing,
+  onRefresh,
+  report
+}: {
+  canRefresh: boolean;
+  isRefreshing: boolean;
+  onRefresh: () => void;
+  report: EnterpriseReadinessReport;
+}) {
   return (
     <div className="report">
       <div className="report-topline">
-        <StatusPill label={report.recommendation} />
-        <span>{formatDate(report.researchedAt)}</span>
+        <div className="report-topline-meta">
+          <StatusPill label={report.recommendation} />
+          <span>{formatDate(report.researchedAt)}</span>
+        </div>
+        {canRefresh ? (
+          <button
+            className="report-refresh-action"
+            disabled={isRefreshing}
+            onClick={onRefresh}
+            type="button"
+          >
+            {isRefreshing ? 'Refreshing...' : 'Refresh research'}
+          </button>
+        ) : null}
       </div>
 
       <div className="report-overview">

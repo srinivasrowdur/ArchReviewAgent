@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: archagent-postgres
+    environment:
+      POSTGRES_USER: archagent
+      POSTGRES_PASSWORD: archagent
+      POSTGRES_DB: archagent
+    ports:
+      - '55432:5432'
+    volumes:
+      - archagent-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  archagent-postgres-data:

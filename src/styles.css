@@ -394,6 +394,40 @@ input {
   gap: 0.8rem;
 }
 
+.report-topline {
+  flex-wrap: wrap;
+}
+
+.report-topline-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.report-refresh-action {
+  border: 1px solid rgba(188, 216, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #eff6ff;
+  padding: 0.48rem 0.8rem;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.report-refresh-action:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(135, 207, 255, 0.32);
+  background: rgba(135, 207, 255, 0.08);
+}
+
+.report-refresh-action:disabled {
+  opacity: 0.48;
+  cursor: wait;
+}
+
 .report-overview p {
   margin: 0.4rem 0 0;
 }

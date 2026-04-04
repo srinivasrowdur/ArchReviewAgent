@@ -43,6 +43,7 @@ export interface EnterpriseReadinessReport {
 
 export interface ResearchRequest {
   companyName: string;
+  refresh?: boolean;
 }
 
 export interface ResearchResponse {
