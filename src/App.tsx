@@ -176,6 +176,7 @@ export default function App() {
     options: SubmitResearchOptions = {}
   ) {
     const activeConversationId = activeConversation.id;
+    const streamedProgressStages: ResearchProgressStage[] = [];
 
     if (!nextCompany || isLoading) {
       return;
@@ -204,6 +205,7 @@ export default function App() {
         : await requestStreamedResearch(nextCompany, {
             refresh: options.forceRefresh,
             onProgress: (update) => {
+              streamedProgressStages.push(update.stage);
               setReportedResearchStage(update.stage);
             }
           });
@@ -215,7 +217,13 @@ export default function App() {
         report: payload.report
       };
 
-      if (isTestMode) {
+      const shouldAppendImmediately =
+        !isTestMode &&
+        (streamedProgressStages.length === 0 ||
+          (streamedProgressStages.length === 1 &&
+            streamedProgressStages[0] === 'finalizing'));
+
+      if (isTestMode || shouldAppendImmediately) {
         startTransition(() => {
           setConversationState((current) =>
             appendMessagesToConversation(current, activeConversationId, [

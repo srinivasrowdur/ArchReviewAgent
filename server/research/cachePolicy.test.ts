@@ -122,7 +122,7 @@ test('evaluateCandidateReport blocks promotion when evidence count regresses', (
   assert.equal(decision.detail, 'euDataResidency');
 });
 
-test('evaluateCandidateReport blocks promotion when source overlap disappears', () => {
+test('evaluateCandidateReport still promotes a candidate when source URLs rotate but coverage holds', () => {
   const baseline = createReport();
   const candidate = createReport({
     guardrails: {
@@ -144,9 +144,8 @@ test('evaluateCandidateReport blocks promotion when source overlap disappears', 
 
   const decision = evaluateCandidateReport(candidate, baseline);
 
-  assert.equal(decision.promoteCandidate, false);
-  assert.equal(decision.reason, 'no_overlap_with_baseline');
-  assert.equal(decision.detail, 'euDataResidency');
+  assert.equal(decision.promoteCandidate, true);
+  assert.equal(decision.reason, 'candidate_coverage_acceptable');
 });
 
 test('evaluateCandidateReport promotes a candidate when coverage is same or better with overlap', () => {

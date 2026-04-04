@@ -11,7 +11,10 @@ import {
   VendorResolutionError
 } from './research/errors.js';
 import { generateResearchMemo } from './research/retrieval.js';
-import { type ResearchProgressUpdate } from '../shared/contracts.js';
+import {
+  liveResearchStages,
+  type ResearchProgressUpdate
+} from '../shared/contracts.js';
 import { buildDecisionFromMemo } from './research/decisioning.js';
 import { evaluateCandidateReport } from './research/cachePolicy.js';
 import {
@@ -141,6 +144,12 @@ async function runResearchWorkflow(
       : await tryLoadAcceptedReportSnapshot(runId, companyName, acceptedSubjectKey);
 
     if (cachedReport) {
+      options.onProgress?.(
+        liveResearchStages.find((stage) => stage.stage === 'finalizing') ?? {
+          stage: 'finalizing',
+          label: 'Finalizing report'
+        }
+      );
       logResearchEvent('report_cache_hit', {
         runId,
         subjectName: companyName,

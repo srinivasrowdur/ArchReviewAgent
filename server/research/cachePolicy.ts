@@ -8,7 +8,6 @@ export type CachePromotionDecision = {
     | 'candidate_unknown'
     | 'candidate_missing_evidence'
     | 'evidence_count_regressed'
-    | 'no_overlap_with_baseline'
     | 'candidate_coverage_acceptable';
   detail?: string;
 };
@@ -69,13 +68,6 @@ export function evaluateCandidateReport(
       };
     }
 
-    if (baselineUrls.size > 0 && countUrlOverlap(candidateUrls, baselineUrls) === 0) {
-      return {
-        promoteCandidate: false,
-        reason: 'no_overlap_with_baseline',
-        detail: guardrailKey
-      };
-    }
   }
 
   return {
@@ -121,16 +113,4 @@ function getUniqueEvidenceUrls(
       .map((item) => item.url.trim())
       .filter(Boolean)
   );
-}
-
-function countUrlOverlap(candidateUrls: Set<string>, baselineUrls: Set<string>) {
-  let overlap = 0;
-
-  for (const url of candidateUrls) {
-    if (baselineUrls.has(url)) {
-      overlap += 1;
-    }
-  }
-
-  return overlap;
 }
