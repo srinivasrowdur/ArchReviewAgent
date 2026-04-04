@@ -51,6 +51,10 @@ const rawResearchDecisionSchema = z.object({
 type RawResearchDecision = z.infer<typeof rawResearchDecisionSchema>;
 type RawAssessment = RawResearchDecision['guardrails']['euDataResidency'];
 type RawEvidenceItem = NonNullable<RawAssessment['evidence']>[number];
+type ProductContextExtraction = {
+  text: string;
+  hasExplicitSection: boolean;
+};
 
 type DecisionRunFn = (
   agent: Agent<any, any>,
@@ -280,12 +284,18 @@ function normalizeDecisionOutput(
   memo: string,
   resolution: VendorResolution
 ): ResearchDecision {
+  const extractedProductContext = extractProductContextFromMemo(memo);
+  const preferRequestedSubject = shouldPreferRequestedSubject(
+    fallbackCompanyName,
+    resolution.canonicalName,
+    memo,
+    extractedProductContext
+  );
   const normalizedCompanyName = normalizeReportedCompanyName(
     decision.companyName,
     fallbackCompanyName,
-    resolution.canonicalName
+    preferRequestedSubject
   );
-  const extractedProductContext = extractProductContextFromMemo(memo);
   const euDataResidency = normalizeAssessment(
     decision.guardrails?.euDataResidency,
     resolution.officialDomains,
@@ -304,8 +314,7 @@ function normalizeDecisionOutput(
       selectVendorOverview(
         decision.vendorOverview,
         extractedProductContext,
-        fallbackCompanyName,
-        resolution.canonicalName
+        preferRequestedSubject
       ),
       420
     ),
@@ -333,7 +342,7 @@ function normalizeDecisionOutput(
 function normalizeReportedCompanyName(
   reportedCompanyName: string | undefined,
   requestedSubjectName: string,
-  resolvedCanonicalName: string
+  preferRequestedSubject: boolean
 ) {
   const normalizedReportedName = reportedCompanyName?.trim();
 
@@ -341,27 +350,29 @@ function normalizeReportedCompanyName(
     return requestedSubjectName;
   }
 
-  return shouldPreferRequestedSubject(requestedSubjectName, resolvedCanonicalName)
-    ? requestedSubjectName
-    : normalizedReportedName;
+  return preferRequestedSubject ? requestedSubjectName : normalizedReportedName;
 }
 
 function selectVendorOverview(
   reportedVendorOverview: string | undefined,
-  extractedProductContext: string,
-  requestedSubjectName: string,
-  resolvedCanonicalName: string
+  extractedProductContext: ProductContextExtraction,
+  preferRequestedSubject: boolean
 ) {
   const normalizedReportedOverview = reportedVendorOverview?.trim();
 
-  if (
-    shouldPreferRequestedSubject(requestedSubjectName, resolvedCanonicalName) &&
-    extractedProductContext
-  ) {
-    return extractedProductContext;
+  if (preferRequestedSubject && extractedProductContext.hasExplicitSection) {
+    return extractedProductContext.text;
   }
 
-  return normalizedReportedOverview || extractedProductContext;
+  if (normalizedReportedOverview) {
+    return normalizedReportedOverview;
+  }
+
+  if (extractedProductContext.hasExplicitSection) {
+    return extractedProductContext.text;
+  }
+
+  return 'No product context was captured in the research memo.';
 }
 
 function coerceRawDecisionOutput(value: unknown): RawResearchDecision {
@@ -652,17 +663,23 @@ function extractProductContextFromMemo(memo: string) {
   const section = extractMemoSection(memo, 'What this product does');
 
   if (section) {
-    return section;
+    return {
+      text: section,
+      hasExplicitSection: true
+    } satisfies ProductContextExtraction;
   }
 
-  const compact = memo.replace(/\s+/g, ' ').trim();
-
-  return compact || 'No product context was captured in the research memo.';
+  return {
+    text: '',
+    hasExplicitSection: false
+  } satisfies ProductContextExtraction;
 }
 
 function shouldPreferRequestedSubject(
   requestedSubjectName: string,
-  resolvedCanonicalName: string
+  resolvedCanonicalName: string,
+  memo: string,
+  extractedProductContext: ProductContextExtraction
 ) {
   const normalizedRequested = normalizeComparableName(requestedSubjectName);
   const normalizedResolved = normalizeComparableName(resolvedCanonicalName);
@@ -675,7 +692,21 @@ function shouldPreferRequestedSubject(
     return false;
   }
 
-  return normalizedRequested.startsWith(`${normalizedResolved} `);
+  if (normalizedRequested.startsWith(`${normalizedResolved} `)) {
+    return true;
+  }
+
+  if (
+    extractedProductContext.hasExplicitSection &&
+    normalizedTextIncludesComparableName(extractedProductContext.text, normalizedRequested)
+  ) {
+    return true;
+  }
+
+  return (
+    normalizedRequested.includes(' ') &&
+    normalizedTextIncludesComparableName(memo, normalizedRequested)
+  );
 }
 
 function normalizeComparableName(value: string) {
@@ -684,6 +715,14 @@ function normalizeComparableName(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+}
+
+function normalizedTextIncludesComparableName(text: string, normalizedComparableName: string) {
+  if (!normalizedComparableName) {
+    return false;
+  }
+
+  return normalizeComparableName(text).includes(normalizedComparableName);
 }
 
 function extractMemoSection(memo: string, heading: string) {

@@ -389,6 +389,125 @@ Microsoft Fabric appears enterprise-ready with documented European region suppor
   assert.match(decision.vendorOverview, /unified analytics platform/i);
 });
 
+test('buildDecisionFromMemo preserves multi-word product subjects even when they do not start with the owner name', async () => {
+  const memo = `
+Vendor
+Microsoft
+What this product does
+Power BI is a business intelligence and analytics product for dashboards, reporting, and self-service data exploration.
+EU data residency
+Power BI supports deployment in European regions through Microsoft-managed regional services.
+Enterprise deployment
+Power BI integrates with enterprise identity, admin, and governance controls.
+Preliminary verdict
+Power BI appears enterprise-ready with documented European region support and enterprise controls.
+`.trim();
+
+  const decision = await buildDecisionFromMemo(
+    'Power BI',
+    memo,
+    {
+      canonicalName: 'Microsoft',
+      officialDomains: ['microsoft.com', 'powerbi.microsoft.com', 'learn.microsoft.com'],
+      confidence: 'high',
+      alternatives: [],
+      rationale: 'Resolved to Microsoft.'
+    },
+    Date.now(),
+    30_000,
+    async () => ({
+      finalOutput: {
+        companyName: 'Microsoft',
+        researchedAt: new Date('2026-04-03T10:00:00Z').toISOString(),
+        vendorOverview:
+          'Microsoft is an enterprise technology vendor offering cloud, productivity, and security services.',
+        preliminaryVerdict:
+          'Power BI appears enterprise-ready with documented European region support and enterprise controls.',
+        recommendation: 'green',
+        guardrails: {
+          euDataResidency: {
+            status: 'supported',
+            confidence: 'high',
+            summary: 'European region support is documented.',
+            risks: [],
+            evidence: []
+          },
+          enterpriseDeployment: {
+            status: 'supported',
+            confidence: 'high',
+            summary: 'Enterprise deployment controls are documented.',
+            risks: [],
+            evidence: []
+          }
+        },
+        unansweredQuestions: []
+      }
+    })
+  );
+
+  assert.equal(decision.companyName, 'Power BI');
+  assert.match(decision.vendorOverview, /business intelligence and analytics product/i);
+});
+
+test('buildDecisionFromMemo keeps the model overview when the product-context heading is missing', async () => {
+  const memo = `
+Vendor
+Microsoft
+EU data residency
+Fabric supports deployment in European regions through Microsoft-managed regional services.
+Enterprise deployment
+Fabric integrates with enterprise identity, admin, and governance controls.
+Preliminary verdict
+Microsoft Fabric appears enterprise-ready with documented European region support and enterprise controls.
+`.trim();
+
+  const decision = await buildDecisionFromMemo(
+    'Microsoft Fabric',
+    memo,
+    {
+      canonicalName: 'Microsoft',
+      officialDomains: ['microsoft.com', 'fabric.microsoft.com', 'learn.microsoft.com'],
+      confidence: 'high',
+      alternatives: [],
+      rationale: 'Resolved to Microsoft.'
+    },
+    Date.now(),
+    30_000,
+    async () => ({
+      finalOutput: {
+        companyName: 'Microsoft',
+        researchedAt: new Date('2026-04-03T10:00:00Z').toISOString(),
+        vendorOverview:
+          'Microsoft Fabric is a unified analytics platform for data engineering, integration, warehousing, and business intelligence workloads.',
+        preliminaryVerdict:
+          'Microsoft Fabric appears enterprise-ready with documented European region support and enterprise controls.',
+        recommendation: 'green',
+        guardrails: {
+          euDataResidency: {
+            status: 'supported',
+            confidence: 'high',
+            summary: 'European region support is documented.',
+            risks: [],
+            evidence: []
+          },
+          enterpriseDeployment: {
+            status: 'supported',
+            confidence: 'high',
+            summary: 'Enterprise deployment controls are documented.',
+            risks: [],
+            evidence: []
+          }
+        },
+        unansweredQuestions: []
+      }
+    })
+  );
+
+  assert.equal(decision.companyName, 'Microsoft Fabric');
+  assert.match(decision.vendorOverview, /unified analytics platform/i);
+  assert.doesNotMatch(decision.vendorOverview, /EU data residency/i);
+});
+
 test('buildDecisionFromMemo maps decision-stage budget exhaustion to ResearchTimeoutError', async () => {
   await assert.rejects(
     () =>
