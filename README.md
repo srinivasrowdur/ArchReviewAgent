@@ -67,6 +67,11 @@ npm run start
 
 The backend serves the built frontend from `dist/` in production mode.
 
+## Architecture documents
+
+- current production architecture: [architecture.md](architecture.md)
+- future extensibility design for configurable guardrails: [docs/extensible-guardrail-architecture.md](docs/extensible-guardrail-architecture.md)
+
 ## Database migrations
 
 ```bash

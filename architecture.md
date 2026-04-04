@@ -9,6 +9,8 @@ This document describes the current implementation of `ArchReviewAgent` from a T
 
 It also includes cross-cutting security controls, runtime flow diagrams, and a pragmatic gap assessment for the next architecture increment.
 
+For the future-state design for configurable guardrails beyond the current two-rule implementation, see [docs/extensible-guardrail-architecture.md](docs/extensible-guardrail-architecture.md).
+
 ## 1. Executive Summary
 
 `ArchReviewAgent` is a procurement-oriented vendor assessment application. A user enters a company or product name, and the system performs a security-analyst-style review focused on two enterprise guardrails:
