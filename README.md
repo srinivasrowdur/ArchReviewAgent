@@ -46,6 +46,7 @@ The default `.env.example` is already configured for that local container:
 - `DATABASE_URL=postgres://archagent:archagent@localhost:55432/archagent`
 - the local Docker helper binds Postgres on `localhost:55432` to avoid common port conflicts
 - loopback browser origins such as `http://localhost:5173` are allowed automatically outside production
+- `INTERNAL_API_TOKEN` is optional; when set in production it unlocks internal-only endpoints like `/api/internal/health` with the `x-internal-api-token` header
 
 For production, set `ALLOWED_ORIGINS` to the exact browser origin or origins that should be able to call the API, for example:
 
@@ -62,6 +63,10 @@ For a fast mocked run without live web research, open:
 For the live backend health check:
 
 - `http://localhost:8787/api/health`
+
+For detailed health output during local debugging:
+
+- `http://localhost:8787/api/internal/health`
 
 ## Production build
 
@@ -89,3 +94,9 @@ If `DATABASE_URL` is configured, the backend will:
 - cache accepted research reports and their evidence metadata
 - reuse fresh accepted reports on repeated lookups for more stable results
 - trigger one background refresh on cache hits, then compare the refreshed candidate against the accepted baseline before promotion
+
+In production:
+
+- `/api/health` returns only a minimal liveness response
+- `/api/chat/test` is not exposed publicly
+- `/api/internal/health` requires the `x-internal-api-token` header if `INTERNAL_API_TOKEN` is configured
