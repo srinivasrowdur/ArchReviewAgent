@@ -21,6 +21,18 @@ export const guardrailsSchema = z.object({
   enterpriseDeployment: assessmentSchema
 });
 
+export const enterpriseReadinessReportSchema = z.object({
+  companyName: z.string(),
+  researchedAt: z.string(),
+  overview: z.string(),
+  executiveSummary: z.string(),
+  recommendation: z.enum(['green', 'yellow', 'red']),
+  deploymentVerdict: z.string(),
+  guardrails: guardrailsSchema,
+  unansweredQuestions: z.array(z.string()).max(6),
+  nextSteps: z.array(z.string()).max(6)
+});
+
 export function normalizeIsoDate(value: string | undefined) {
   if (!value?.trim()) {
     return new Date().toISOString();
