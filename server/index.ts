@@ -17,6 +17,7 @@ import {
 } from './researchAgent.js';
 import { createMockReport } from './mockReport.js';
 import { checkDatabaseHealth } from './db/client.js';
+import { isAllowedCorsOrigin } from './cors.js';
 import type {
   ResearchProgressUpdate,
   ResearchRequest,
@@ -38,7 +39,7 @@ app.set('trust proxy', true);
 app.use((req, res, next) => {
   cors({
     origin(origin, callback) {
-      callback(null, isAllowedCorsOrigin(req, origin));
+      callback(null, isAllowedCorsOrigin(req, origin, configuredAllowedOrigins));
     }
   })(req, res, next);
 });
@@ -234,48 +235,6 @@ function formatResearchError(error: unknown) {
     status: 500,
     message: 'Unexpected backend error while running enterprise research.'
   };
-}
-
-function isAllowedCorsOrigin(req: express.Request, requestOrigin: string | undefined) {
-  if (!requestOrigin) {
-    return true;
-  }
-
-  if (configuredAllowedOrigins.has(requestOrigin)) {
-    return true;
-  }
-
-  if (isSameOriginRequest(req, requestOrigin)) {
-    return true;
-  }
-
-  if (process.env.NODE_ENV !== 'production' && isLoopbackOrigin(requestOrigin)) {
-    return true;
-  }
-
-  return false;
-}
-
-function isSameOriginRequest(req: express.Request, requestOrigin: string) {
-  try {
-    const originUrl = new URL(requestOrigin);
-    const host = req.get('x-forwarded-host') ?? req.get('host');
-    const protocol = req.get('x-forwarded-proto') ?? req.protocol;
-
-    return Boolean(host) && originUrl.host === host && originUrl.protocol === `${protocol}:`;
-  } catch {
-    return false;
-  }
-}
-
-function isLoopbackOrigin(requestOrigin: string) {
-  try {
-    const originUrl = new URL(requestOrigin);
-
-    return ['127.0.0.1', '::1', 'localhost'].includes(originUrl.hostname);
-  } catch {
-    return false;
-  }
 }
 
 if (fs.existsSync(distDir)) {
