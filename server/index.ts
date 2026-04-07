@@ -18,6 +18,7 @@ import {
 import { createMockReport } from './mockReport.js';
 import { checkDatabaseHealth } from './db/client.js';
 import { isAllowedCorsOrigin } from './cors.js';
+import { createSecurityHeadersMiddleware } from './securityHeaders.js';
 import type {
   ResearchProgressUpdate,
   ResearchRequest,
@@ -35,7 +36,9 @@ const configuredAllowedOrigins = new Set(
     .filter(Boolean)
 );
 
+app.disable('x-powered-by');
 app.set('trust proxy', true);
+app.use(createSecurityHeadersMiddleware());
 app.use((req, res, next) => {
   cors({
     origin(origin, callback) {
