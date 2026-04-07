@@ -16,12 +16,17 @@ const runnerEntrypoint = path.join(
   'evals',
   'runDeterministicReleaseEvals.ts'
 );
-const releaseCorePath = path.join(repoRoot, 'evals', 'cases', 'release-core.jsonl');
+const releaseDeterministicPath = path.join(
+  repoRoot,
+  'evals',
+  'cases',
+  'release-deterministic.jsonl'
+);
 
 test('deterministic release eval runner passes on the current baseline', async () => {
   const result = await execFileAsync(
     'node',
-    ['--import', 'tsx', runnerEntrypoint, releaseCorePath],
+    ['--import', 'tsx', runnerEntrypoint, releaseDeterministicPath],
     {
       cwd: repoRoot
     }
@@ -34,6 +39,7 @@ test('deterministic release eval runner passes on the current baseline', async (
   assert.equal(summary.totals.failed, 0);
   assert.ok(summary.totals.passed > 0);
   assert.ok(summary.totals.cases >= summary.totals.passed);
+  assert.equal(summary.totals.skipped, 0);
 });
 
 test('deterministic release eval runner reports targeted failures', async () => {

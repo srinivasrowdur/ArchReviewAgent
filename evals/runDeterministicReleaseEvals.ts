@@ -6,9 +6,14 @@ import { evalCaseSchema } from './caseSchema.js';
 import { createMockReport } from '../server/mockReport.js';
 import { enterpriseReadinessReportSchema } from '../server/research/reportSchema.js';
 import {
-  InvalidVendorInputError
+  InvalidVendorInputError,
+  VendorResolutionError
 } from '../server/research/errors.js';
-import { validateVendorInput } from '../server/research/vendorIntake.js';
+import {
+  buildAmbiguousVendorResolutionMessage,
+  validateVendorInput
+} from '../server/research/vendorIntake.js';
+import { formatResearchError } from '../server/formatResearchError.js';
 
 type EvalResult =
   | {
@@ -43,7 +48,7 @@ type EvalSummary = {
 async function main() {
   const inputPaths = process.argv.slice(2);
   const casePaths =
-    inputPaths.length > 0 ? inputPaths : ['evals/cases/release-core.jsonl'];
+    inputPaths.length > 0 ? inputPaths : ['evals/cases/release-deterministic.jsonl'];
   const cases = await loadEvalCases(casePaths);
   const results = cases.map(runCase);
   const summary = buildSummary(results);
@@ -89,70 +94,127 @@ function runCase(evalCase: EvalCase): EvalResult {
     try {
       const report = createMockReport(evalCase.input);
       enterpriseReadinessReportSchema.parse(report);
+      const reportDomains = getReportDomains(report);
+      const expectedDomains = new Set(
+        evalCase.expected_official_domains.map((item) => item.trim().toLowerCase())
+      );
+
+      assertEqual(
+        report.companyName,
+        evalCase.expected_subject,
+        'companyName did not match expected_subject'
+      );
+      assertEqual(
+        report.companyName,
+        evalCase.expected_vendor,
+        'companyName did not match expected_vendor'
+      );
+      assertEqual(
+        report.recommendation,
+        evalCase.expected_recommendation,
+        'recommendation did not match expected_recommendation'
+      );
+      assertEqual(
+        report.guardrails.euDataResidency.status,
+        evalCase.expected_guardrails.euDataResidency.status,
+        'EU residency status did not match expected_guardrails'
+      );
+      assertEqual(
+        report.guardrails.enterpriseDeployment.status,
+        evalCase.expected_guardrails.enterpriseDeployment.status,
+        'Enterprise deployment status did not match expected_guardrails'
+      );
+
+      if (!setEquals(reportDomains, expectedDomains)) {
+        throw new Error(
+          `report domains ${JSON.stringify([...reportDomains])} did not match expected_official_domains ${JSON.stringify([...expectedDomains])}`
+        );
+      }
 
       return {
         caseId: evalCase.id,
         category: evalCase.category,
         outcome: 'passed',
-        detail: 'Mock backend report satisfied the report contract.'
+        detail: 'Deterministic success assertions passed.'
       };
     } catch (error) {
       return {
         caseId: evalCase.id,
         category: evalCase.category,
         outcome: 'failed',
-        detail: describeError(error, 'Mock backend report did not satisfy the report contract.')
-      };
-    }
-  }
-
-  if (evalCase.expected_error.status !== 400) {
-    return {
-      caseId: evalCase.id,
-      category: evalCase.category,
-      outcome: 'skipped',
-      detail:
-        'Deterministic release evals currently cover only synchronous input-validation rejections.'
-    };
-  }
-
-  try {
-    validateVendorInput(evalCase.input);
-
-    return {
-      caseId: evalCase.id,
-      category: evalCase.category,
-      outcome: 'failed',
-      detail: `Expected a 400 rejection containing "${evalCase.expected_error.message_includes}", but validation accepted the input.`
-    };
-  } catch (error) {
-    if (!(error instanceof InvalidVendorInputError)) {
-      return {
-        caseId: evalCase.id,
-        category: evalCase.category,
-        outcome: 'failed',
         detail: describeError(
           error,
-          `Expected InvalidVendorInputError with message containing "${evalCase.expected_error.message_includes}".`
+          'Deterministic success assertions did not pass.'
         )
       };
     }
+  }
 
-    if (!error.message.includes(evalCase.expected_error.message_includes)) {
+  const rejectionCheck = evaluateRejectedCase(evalCase);
+
+  return rejectionCheck;
+}
+
+function evaluateRejectedCase(
+  evalCase: Extract<EvalCase, { expected_outcome: 'rejection' }>
+): EvalResult {
+  try {
+    let formattedError: ReturnType<typeof formatResearchError> | null = null;
+
+    if (evalCase.expected_error.status === 400) {
+      try {
+        validateVendorInput(evalCase.input);
+      } catch (error) {
+        if (error instanceof InvalidVendorInputError) {
+          formattedError = formatResearchError(error);
+        } else {
+          throw error;
+        }
+      }
+    } else if (evalCase.expected_error.status === 422) {
+      const ambiguousError = new VendorResolutionError(
+        buildAmbiguousVendorResolutionMessage([])
+      );
+      formattedError = formatResearchError(ambiguousError);
+    }
+
+    if (!formattedError) {
       return {
         caseId: evalCase.id,
         category: evalCase.category,
         outcome: 'failed',
         detail:
-          `Expected rejection message containing "${evalCase.expected_error.message_includes}", got "${error.message}".`
+          `Expected a ${evalCase.expected_error.status} rejection containing "${evalCase.expected_error.message_includes}", but no error was produced.`
+      };
+    }
+
+    if (formattedError.status !== evalCase.expected_error.status) {
+      return {
+        caseId: evalCase.id,
+        category: evalCase.category,
+        outcome: 'failed',
+        detail:
+          `Expected rejection status ${evalCase.expected_error.status}, got ${formattedError.status}.`
       };
     }
 
     return {
       caseId: evalCase.id,
       category: evalCase.category,
-      outcome: 'passed',
-      detail: 'Input validation rejected the request as expected.'
+      outcome:
+        formattedError.message.includes(evalCase.expected_error.message_includes)
+          ? 'passed'
+          : 'failed',
+      detail: formattedError.message.includes(evalCase.expected_error.message_includes)
+        ? 'Deterministic rejection assertions passed.'
+        : `Expected rejection message containing "${evalCase.expected_error.message_includes}", got "${formattedError.message}".`
+    };
+  } catch (error) {
+    return {
+      caseId: evalCase.id,
+      category: evalCase.category,
+      outcome: 'failed',
+      detail: describeError(error, 'Deterministic rejection assertions did not pass.')
     };
   }
 }
@@ -167,6 +229,47 @@ function buildSummary(results: EvalResult[]): EvalSummary {
     },
     results
   };
+}
+
+function getReportDomains(
+  report: typeof enterpriseReadinessReportSchema._type
+): Set<string> {
+  const urls = [
+    ...report.guardrails.euDataResidency.evidence.map((item) => item.url),
+    ...report.guardrails.enterpriseDeployment.evidence.map((item) => item.url)
+  ];
+
+  return new Set(
+    urls
+      .map((value) => {
+        try {
+          return new URL(value).hostname.toLowerCase();
+        } catch {
+          return '';
+        }
+      })
+      .filter(Boolean)
+  );
+}
+
+function setEquals(left: Set<string>, right: Set<string>) {
+  if (left.size !== right.size) {
+    return false;
+  }
+
+  for (const item of left) {
+    if (!right.has(item)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function assertEqual<T>(actual: T, expected: T, message: string) {
+  if (actual !== expected) {
+    throw new Error(`${message}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  }
 }
 
 function describeError(error: unknown, fallback: string) {
