@@ -81,6 +81,7 @@ The backend serves the built frontend from `dist/` in production mode.
 
 - current production architecture: [architecture.md](architecture.md)
 - future extensibility design for configurable guardrails: [docs/extensible-guardrail-architecture.md](docs/extensible-guardrail-architecture.md)
+- evaluation strategy for releases and production: [docs/evaluation-plan.md](docs/evaluation-plan.md)
 
 ## Database migrations
 
