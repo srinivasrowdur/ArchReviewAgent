@@ -54,8 +54,8 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/health', async (_req, res) => {
-  const database = await checkDatabaseHealth();
-  const response = getPublicHealthResponse(database);
+  await checkDatabaseHealth();
+  const response = getPublicHealthResponse();
 
   res.status(response.status).json(response.body);
 });

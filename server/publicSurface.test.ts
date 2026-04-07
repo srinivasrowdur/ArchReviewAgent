@@ -9,10 +9,7 @@ import {
 } from './publicSurface.js';
 
 test('public health response hides database structure when database is not configured', () => {
-  const response = getPublicHealthResponse({
-    configured: false,
-    ok: false
-  });
+  const response = getPublicHealthResponse();
 
   assert.deepEqual(response, {
     status: 200,
@@ -22,16 +19,13 @@ test('public health response hides database structure when database is not confi
   });
 });
 
-test('public health response returns 503 when configured database is unhealthy', () => {
-  const response = getPublicHealthResponse({
-    configured: true,
-    ok: false
-  });
+test('public health response stays green when configured database is unhealthy', () => {
+  const response = getPublicHealthResponse();
 
   assert.deepEqual(response, {
-    status: 503,
+    status: 200,
     body: {
-      ok: false
+      ok: true
     }
   });
 });

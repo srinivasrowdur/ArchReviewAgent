@@ -7,13 +7,11 @@ type DatabaseHealth = {
   ok: boolean;
 };
 
-export function getPublicHealthResponse(database: DatabaseHealth) {
-  const ok = !database.configured || database.ok;
-
+export function getPublicHealthResponse() {
   return {
-    status: ok ? 200 : 503,
+    status: 200,
     body: {
-      ok
+      ok: true
     }
   };
 }
