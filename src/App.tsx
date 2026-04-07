@@ -823,14 +823,16 @@ function MarkdownContent({
         const key = `${block.type}-${index}`;
 
         if (block.type === 'list') {
+          const ListTag = block.ordered ? 'ol' : 'ul';
+
           return (
-            <ul key={key}>
+            <ListTag key={key}>
               {block.items.map((item, itemIndex) => (
                 <li key={`${key}-${itemIndex}`}>
-                  <MarkdownInline text={item} />
+                  <MarkdownInline allowLinks={allowLinks} text={item} />
                 </li>
               ))}
-            </ul>
+            </ListTag>
           );
         }
 
@@ -866,8 +868,10 @@ function formatDate(value: string) {
 
 function parseMarkdownBlocks(text: string) {
   const lines = text.replace(/\r/g, '').split('\n');
-  const blocks: Array<{ type: 'paragraph'; text: string } | { type: 'list'; items: string[] }> =
-    [];
+  const blocks: Array<
+    | { type: 'paragraph'; text: string }
+    | { type: 'list'; items: string[]; ordered: boolean }
+  > = [];
   let currentBlock: string[] = [];
 
   const flushBlock = () => {
@@ -882,14 +886,28 @@ function parseMarkdownBlocks(text: string) {
       return;
     }
 
-    const listItems = meaningfulLines
-      .map((line) => line.match(/^\s*(?:[-*+]|\d+\.)\s+(.*)$/)?.[1]?.trim() ?? null);
-    const isList = listItems.every((item) => item && item.length > 0);
+    const listItems = meaningfulLines.map(parseMarkdownListItem);
+    const firstListItem = listItems[0];
+    const isList =
+      Boolean(firstListItem) &&
+      listItems.every(
+        (item) => item && item.ordered === firstListItem.ordered && item.text.length > 0
+      );
 
-    if (isList) {
+    if (isList && firstListItem) {
       blocks.push({
         type: 'list',
-        items: listItems.filter((item): item is string => Boolean(item))
+        ordered: firstListItem.ordered,
+        items: listItems
+          .filter(
+            (
+              item
+            ): item is {
+              text: string;
+              ordered: boolean;
+            } => Boolean(item)
+          )
+          .map((item) => item.text)
       });
     } else {
       blocks.push({
@@ -913,6 +931,28 @@ function parseMarkdownBlocks(text: string) {
   flushBlock();
 
   return blocks;
+}
+
+function parseMarkdownListItem(line: string) {
+  const orderedMatch = line.match(/^\s*\d+\.\s+(.*)$/);
+
+  if (orderedMatch) {
+    return {
+      ordered: true,
+      text: orderedMatch[1].trim()
+    };
+  }
+
+  const unorderedMatch = line.match(/^\s*[-*+]\s+(.*)$/);
+
+  if (unorderedMatch) {
+    return {
+      ordered: false,
+      text: unorderedMatch[1].trim()
+    };
+  }
+
+  return null;
 }
 
 function renderMarkdownInline(
