@@ -7,7 +7,9 @@ import { evalCaseSchema } from './caseSchema.js';
 async function main() {
   const args = process.argv.slice(2);
   const requestedPaths = args.length > 0 ? args : ['evals/cases'];
-  const jsonlFiles = await collectJsonlFiles(requestedPaths);
+  const jsonlFiles = await collectJsonlFiles(requestedPaths, {
+    skipFixtureDirectories: args.length === 0
+  });
 
   if (jsonlFiles.length === 0) {
     throw new Error('No JSONL case files found.');
@@ -62,12 +64,19 @@ async function main() {
   );
 }
 
-async function collectJsonlFiles(inputPaths: string[]) {
+type CollectJsonlOptions = {
+  skipFixtureDirectories: boolean;
+};
+
+async function collectJsonlFiles(
+  inputPaths: string[],
+  options: CollectJsonlOptions
+) {
   const discovered = new Set<string>();
 
   for (const inputPath of inputPaths) {
     const absolutePath = path.resolve(inputPath);
-    await collectJsonlFilesFromPath(absolutePath, discovered);
+    await collectJsonlFilesFromPath(absolutePath, discovered, options);
   }
 
   return [...discovered].sort();
@@ -75,17 +84,26 @@ async function collectJsonlFiles(inputPaths: string[]) {
 
 async function collectJsonlFilesFromPath(
   absolutePath: string,
-  discovered: Set<string>
+  discovered: Set<string>,
+  options: CollectJsonlOptions
 ) {
   const entry = await stat(absolutePath);
 
   if (entry.isDirectory()) {
+    if (
+      options.skipFixtureDirectories &&
+      path.basename(absolutePath) === '_fixtures'
+    ) {
+      return;
+    }
+
     const children = await readdir(absolutePath, { withFileTypes: true });
 
     for (const child of children) {
       await collectJsonlFilesFromPath(
         path.join(absolutePath, child.name),
-        discovered
+        discovered,
+        options
       );
     }
 
