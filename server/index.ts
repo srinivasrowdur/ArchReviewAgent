@@ -27,12 +27,21 @@ const app = express();
 const port = Number(process.env.PORT ?? 8787);
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(currentDir, '../../dist');
-
-app.use(
-  cors({
-    origin: true
-  })
+const configuredAllowedOrigins = new Set(
+  (process.env.ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
 );
+
+app.set('trust proxy', true);
+app.use((req, res, next) => {
+  cors({
+    origin(origin, callback) {
+      callback(null, isAllowedCorsOrigin(req, origin));
+    }
+  })(req, res, next);
+});
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/health', async (_req, res) => {
@@ -225,6 +234,48 @@ function formatResearchError(error: unknown) {
     status: 500,
     message: 'Unexpected backend error while running enterprise research.'
   };
+}
+
+function isAllowedCorsOrigin(req: express.Request, requestOrigin: string | undefined) {
+  if (!requestOrigin) {
+    return true;
+  }
+
+  if (configuredAllowedOrigins.has(requestOrigin)) {
+    return true;
+  }
+
+  if (isSameOriginRequest(req, requestOrigin)) {
+    return true;
+  }
+
+  if (process.env.NODE_ENV !== 'production' && isLoopbackOrigin(requestOrigin)) {
+    return true;
+  }
+
+  return false;
+}
+
+function isSameOriginRequest(req: express.Request, requestOrigin: string) {
+  try {
+    const originUrl = new URL(requestOrigin);
+    const host = req.get('x-forwarded-host') ?? req.get('host');
+    const protocol = req.get('x-forwarded-proto') ?? req.protocol;
+
+    return Boolean(host) && originUrl.host === host && originUrl.protocol === `${protocol}:`;
+  } catch {
+    return false;
+  }
+}
+
+function isLoopbackOrigin(requestOrigin: string) {
+  try {
+    const originUrl = new URL(requestOrigin);
+
+    return ['127.0.0.1', '::1', 'localhost'].includes(originUrl.hostname);
+  } catch {
+    return false;
+  }
 }
 
 if (fs.existsSync(distDir)) {
