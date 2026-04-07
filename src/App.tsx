@@ -1,4 +1,4 @@
-import { useEffect, useState, useTransition } from 'react';
+import { Fragment, useEffect, useState, useTransition, type ReactNode } from 'react';
 import type {
   EnterpriseReadinessReport,
   GuardrailAssessment,
@@ -642,7 +642,7 @@ function MessageBubble({
       <div className="message-meta">
         {message.role === 'assistant' ? 'agent' : 'user'}
       </div>
-      <p className="message-copy">{message.content}</p>
+      <MarkdownContent className="message-copy" text={message.content} />
       {message.report ? (
         <ReportView
           canRefresh={canRefresh}
@@ -688,7 +688,7 @@ function ReportView({
       <div className="report-overview">
         <h3>{report.companyName}</h3>
         <p className="section-label">What this product does</p>
-        <p>{report.overview}</p>
+        <MarkdownContent text={report.overview} />
       </div>
 
       <section className="guardrail-grid">
@@ -705,13 +705,17 @@ function ReportView({
       <section className="report-detail">
         <div>
           <p className="section-label">Deployment verdict</p>
-          <p>{report.deploymentVerdict}</p>
+          <MarkdownContent text={report.deploymentVerdict} />
         </div>
         <div>
           <p className="section-label">Open questions</p>
           <ul>
             {report.unansweredQuestions.length > 0 ? (
-              report.unansweredQuestions.map((item) => <li key={item}>{item}</li>)
+              report.unansweredQuestions.map((item) => (
+                <li key={item}>
+                  <MarkdownInline text={item} />
+                </li>
+              ))
             ) : (
               <li>No major unanswered questions were surfaced.</li>
             )}
@@ -721,7 +725,9 @@ function ReportView({
           <p className="section-label">Suggested next steps</p>
           <ul>
             {report.nextSteps.map((step) => (
-              <li key={step}>{step}</li>
+              <li key={step}>
+                <MarkdownInline text={step} />
+              </li>
             ))}
           </ul>
         </div>
@@ -743,12 +749,14 @@ function GuardrailCard({
         <h4>{title}</h4>
         <StatusPill label={assessment.status} subtle />
       </div>
-      <p>{assessment.summary}</p>
+      <MarkdownContent text={assessment.summary} />
       <p className="confidence-line">Confidence: {assessment.confidence}</p>
 
       <ul>
         {assessment.risks.map((risk) => (
-          <li key={risk}>{risk}</li>
+          <li key={risk}>
+            <MarkdownInline text={risk} />
+          </li>
         ))}
       </ul>
 
@@ -765,7 +773,9 @@ function GuardrailCard({
             <small>
               {item.publisher} · {item.sourceType}
             </small>
-            <strong>{item.finding}</strong>
+            <strong>
+              <MarkdownInline allowLinks={false} text={item.finding} />
+            </strong>
           </a>
         ))}
       </div>
@@ -789,6 +799,61 @@ function StatusPill({
   );
 }
 
+function MarkdownContent({
+  className,
+  allowLinks = true,
+  text
+}: {
+  className?: string;
+  allowLinks?: boolean;
+  text: string;
+}) {
+  const normalizedText = text.trim();
+
+  if (!normalizedText) {
+    return null;
+  }
+
+  const classNames = ['markdown-content', className].filter(Boolean).join(' ');
+  const blocks = parseMarkdownBlocks(normalizedText);
+
+  return (
+    <div className={classNames}>
+      {blocks.map((block, index) => {
+        const key = `${block.type}-${index}`;
+
+        if (block.type === 'list') {
+          return (
+            <ul key={key}>
+              {block.items.map((item, itemIndex) => (
+                <li key={`${key}-${itemIndex}`}>
+                  <MarkdownInline text={item} />
+                </li>
+              ))}
+            </ul>
+          );
+        }
+
+        return (
+          <p key={key}>
+            <MarkdownInline allowLinks={allowLinks} text={block.text} />
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function MarkdownInline({
+  allowLinks = true,
+  text
+}: {
+  allowLinks?: boolean;
+  text: string;
+}) {
+  return <>{renderMarkdownInline(text, 'md', allowLinks)}</>;
+}
+
 function formatDate(value: string) {
   const parsed = new Date(value);
 
@@ -797,6 +862,134 @@ function formatDate(value: string) {
   }
 
   return dateFormatter.format(parsed);
+}
+
+function parseMarkdownBlocks(text: string) {
+  const lines = text.replace(/\r/g, '').split('\n');
+  const blocks: Array<{ type: 'paragraph'; text: string } | { type: 'list'; items: string[] }> =
+    [];
+  let currentBlock: string[] = [];
+
+  const flushBlock = () => {
+    if (currentBlock.length === 0) {
+      return;
+    }
+
+    const meaningfulLines = currentBlock.filter((line) => line.trim().length > 0);
+
+    if (meaningfulLines.length === 0) {
+      currentBlock = [];
+      return;
+    }
+
+    const listItems = meaningfulLines
+      .map((line) => line.match(/^\s*(?:[-*+]|\d+\.)\s+(.*)$/)?.[1]?.trim() ?? null);
+    const isList = listItems.every((item) => item && item.length > 0);
+
+    if (isList) {
+      blocks.push({
+        type: 'list',
+        items: listItems.filter((item): item is string => Boolean(item))
+      });
+    } else {
+      blocks.push({
+        type: 'paragraph',
+        text: meaningfulLines.join('\n').trim()
+      });
+    }
+
+    currentBlock = [];
+  };
+
+  for (const line of lines) {
+    if (line.trim().length === 0) {
+      flushBlock();
+      continue;
+    }
+
+    currentBlock.push(line);
+  }
+
+  flushBlock();
+
+  return blocks;
+}
+
+function renderMarkdownInline(
+  text: string,
+  keyPrefix = 'md',
+  allowLinks = true
+) {
+  const nodes: ReactNode[] = [];
+  const lineBreakSplit = text.split('\n');
+
+  lineBreakSplit.forEach((line, lineIndex) => {
+    if (lineIndex > 0) {
+      nodes.push(<br key={`${keyPrefix}-br-${lineIndex}`} />);
+    }
+
+    let remaining = line;
+    let tokenIndex = 0;
+
+    while (remaining.length > 0) {
+      const match = remaining.match(
+        /(\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*|__([^_]+)__|`([^`]+)`|\*([^*]+)\*|_([^_]+)_)/
+      );
+
+      if (!match || match.index === undefined) {
+        nodes.push(remaining);
+        break;
+      }
+
+      if (match.index > 0) {
+        nodes.push(remaining.slice(0, match.index));
+      }
+
+      const fullMatch = match[0];
+      const matchKey = `${keyPrefix}-${lineIndex}-${tokenIndex}`;
+
+      if (match[2] && match[3]) {
+        const href = normalizeMarkdownLink(match[3]);
+
+        nodes.push(
+          href && allowLinks ? (
+            <a href={href} key={matchKey} rel="noreferrer" target="_blank">
+              {match[2]}
+            </a>
+          ) : (
+            match[2]
+          )
+        );
+      } else if (match[4] || match[5]) {
+        nodes.push(<strong key={matchKey}>{match[4] ?? match[5]}</strong>);
+      } else if (match[6]) {
+        nodes.push(<code key={matchKey}>{match[6]}</code>);
+      } else if (match[7] || match[8]) {
+        nodes.push(<em key={matchKey}>{match[7] ?? match[8]}</em>);
+      }
+
+      remaining = remaining.slice(match.index + fullMatch.length);
+      tokenIndex += 1;
+    }
+  });
+
+  return nodes.map((node, index) =>
+    typeof node === 'string' ? <Fragment key={`${keyPrefix}-text-${index}`}>{node}</Fragment> : node
+  );
+}
+
+function normalizeMarkdownLink(rawHref: string) {
+  try {
+    const parsed = new URL(rawHref);
+
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString();
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function loadConversationState(): ConversationState {
@@ -961,7 +1154,7 @@ function getConversationPreview(conversation: ConversationRecord) {
   );
 
   return (
-    lastMeaningfulMessage?.content ||
+    toPlainTextPreview(lastMeaningfulMessage?.content || '') ||
     'Start a new vendor review to persist results in this browser.'
   );
 }
@@ -983,4 +1176,12 @@ function findLastMessage(
   }
 
   return undefined;
+}
+
+function toPlainTextPreview(value: string) {
+  return value
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .replace(/[*_`>#-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
