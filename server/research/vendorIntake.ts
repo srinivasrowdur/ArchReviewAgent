@@ -17,6 +17,14 @@ const vendorResolutionSchema = z.object({
 
 export type VendorResolution = z.infer<typeof vendorResolutionSchema>;
 
+export function buildAmbiguousVendorResolutionMessage(alternatives: string[]) {
+  const suggestions = alternatives.length
+    ? ` Did you mean ${alternatives.join(', ')}?`
+    : '';
+
+  return `The vendor name is ambiguous or likely misspelled.${suggestions}`;
+}
+
 const vendorResolutionAgent = new Agent({
   name: 'Vendor resolver',
   instructions: `
@@ -164,12 +172,8 @@ export async function resolveVendorIdentity(
     const normalized = normalizeVendorResolution(resolved);
 
     if (normalized.confidence === 'low') {
-      const suggestions = normalized.alternatives.length
-        ? ` Did you mean ${normalized.alternatives.join(', ')}?`
-        : '';
-
       throw new VendorResolutionError(
-        `The vendor name is ambiguous or likely misspelled.${suggestions}`
+        buildAmbiguousVendorResolutionMessage(normalized.alternatives)
       );
     }
 

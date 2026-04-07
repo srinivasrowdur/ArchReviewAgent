@@ -5,28 +5,19 @@ import type {
 } from '../../shared/contracts.js';
 import { IncompleteResearchError } from './errors.js';
 import type { ResearchDecision } from './decisioning.js';
-import { guardrailsSchema, normalizeIsoDate } from './reportSchema.js';
+import {
+  enterpriseReadinessReportSchema,
+  normalizeIsoDate
+} from './reportSchema.js';
 
-const enterpriseReadinessSchema = z.object({
-  companyName: z.string(),
-  researchedAt: z.string(),
-  overview: z.string(),
-  executiveSummary: z.string(),
-  recommendation: z.enum(['green', 'yellow', 'red']),
-  deploymentVerdict: z.string(),
-  guardrails: guardrailsSchema,
-  unansweredQuestions: z.array(z.string()).max(6),
-  nextSteps: z.array(z.string()).max(6)
-});
-
-type StructuredReadinessReport = z.infer<typeof enterpriseReadinessSchema>;
+type StructuredReadinessReport = z.infer<typeof enterpriseReadinessReportSchema>;
 
 export function presentDecision(decision: ResearchDecision): EnterpriseReadinessReport {
   const executiveSummary =
     decision.preliminaryVerdict.trim().length >= 80
       ? decision.preliminaryVerdict
       : buildExecutiveSummary(decision.companyName, decision.recommendation);
-  const report = enterpriseReadinessSchema.parse({
+  const report = enterpriseReadinessReportSchema.parse({
     companyName: decision.companyName,
     researchedAt: decision.researchedAt,
     overview: decision.vendorOverview,
