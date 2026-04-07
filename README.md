@@ -49,7 +49,7 @@ The default `.env.example` is already configured for that local container:
 
 For production, set `ALLOWED_ORIGINS` to the exact browser origin or origins that should be able to call the API, for example:
 
-- `ALLOWED_ORIGINS=https://archreviewagent.onrender.com`
+- `ALLOWED_ORIGINS=https://your-app.example.com`
 
 Frontend: `http://localhost:5173`
 
