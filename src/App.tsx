@@ -12,7 +12,8 @@ import {
 } from '../shared/contracts';
 
 const isTestMode =
-  new URLSearchParams(window.location.search).get('mode') === 'test';
+  new URLSearchParams(window.location.search).get('mode') === 'test' &&
+  isLoopbackHostname(window.location.hostname);
 const conversationStorageKey = `archreviewagent.conversations.${isTestMode ? 'test' : 'live'}`;
 const maxStoredConversations = 40;
 const dateFormatter = new Intl.DateTimeFormat('en-GB', {
@@ -864,6 +865,12 @@ function formatDate(value: string) {
   }
 
   return dateFormatter.format(parsed);
+}
+
+function isLoopbackHostname(hostname: string) {
+  const normalizedHostname = hostname.replace(/^\[(.*)\]$/, '$1');
+
+  return ['127.0.0.1', '::1', 'localhost'].includes(normalizedHostname);
 }
 
 function parseMarkdownBlocks(text: string) {

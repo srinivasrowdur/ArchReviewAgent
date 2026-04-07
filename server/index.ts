@@ -18,6 +18,11 @@ import {
 import { createMockReport } from './mockReport.js';
 import { checkDatabaseHealth } from './db/client.js';
 import { isAllowedCorsOrigin } from './cors.js';
+import {
+  getDetailedHealthResponse,
+  getPublicHealthResponse,
+  isInternalApiAuthorized
+} from './publicSurface.js';
 import { createSecurityHeadersMiddleware } from './securityHeaders.js';
 import type {
   ResearchProgressUpdate,
@@ -49,15 +54,30 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/health', async (_req, res) => {
-  const database = await checkDatabaseHealth();
+  await checkDatabaseHealth();
+  const response = getPublicHealthResponse();
 
-  res.json({
-    ok: true,
-    database
-  });
+  res.status(response.status).json(response.body);
+});
+
+app.get('/api/internal/health', async (req, res) => {
+  if (!isInternalApiAuthorized(req)) {
+    res.status(404).end();
+    return;
+  }
+
+  const database = await checkDatabaseHealth();
+  const response = getDetailedHealthResponse(database);
+
+  res.status(response.status).json(response.body);
 });
 
 app.post('/api/chat/test', (req, res) => {
+  if (!isInternalApiAuthorized(req)) {
+    res.status(404).end();
+    return;
+  }
+
   const { companyName: normalizedCompanyName } = getResearchRequestData(req);
 
   const response: ResearchResponse = {
