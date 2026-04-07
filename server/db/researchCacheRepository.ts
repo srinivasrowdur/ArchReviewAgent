@@ -44,10 +44,14 @@ export async function loadCachedVendorResolution(requestedSubjectName: string) {
     return null;
   }
 
-  const relatedRows = await loadCachedVendorResolutionRowsByCanonicalName(row.canonical_name);
+  const canonicalSubjectKey = normalizeSubjectCacheKey(row.canonical_name);
+  const canonicalRow =
+    canonicalSubjectKey === subjectKey
+      ? row
+      : await loadCachedVendorResolutionRowByKey(canonicalSubjectKey);
 
   return mapCachedVendorResolutionRow(
-    pickMostCompleteVendorResolutionRow(relatedRows.length > 0 ? relatedRows : [row])
+    pickMostCompleteVendorResolutionRow(canonicalRow ? [row, canonicalRow] : [row])
   );
 }
 
@@ -64,6 +68,15 @@ export async function storeVendorResolution(
     requestedSubjectName,
     resolution.canonicalName
   );
+  const existingRows = await loadCachedVendorResolutionRowsByKeys(
+    cacheEntries.map((entry) => entry.subjectKey)
+  );
+  const persistedResolution = pickMostCompleteVendorResolution([
+    ...existingRows
+      .map((row) => mapCachedVendorResolutionRow(row))
+      .filter((row): row is VendorResolution => row !== null),
+    resolution
+  ]);
 
   await withDatabaseClient(async (client) => {
     await queryWithClient(client, 'begin');
@@ -96,11 +109,11 @@ export async function storeVendorResolution(
           [
             entry.subjectKey,
             entry.requestedSubjectName,
-            resolution.canonicalName,
-            JSON.stringify(resolution.officialDomains),
-            resolution.confidence,
-            JSON.stringify(resolution.alternatives),
-            resolution.rationale,
+            persistedResolution.canonicalName,
+            JSON.stringify(persistedResolution.officialDomains),
+            persistedResolution.confidence,
+            JSON.stringify(persistedResolution.alternatives),
+            persistedResolution.rationale,
             expiresAt.toISOString()
           ]
         );
@@ -374,6 +387,18 @@ export function pickMostCompleteVendorResolutionRow<T extends CachedResolutionRo
   );
 }
 
+export function pickMostCompleteVendorResolution(
+  resolutions: readonly VendorResolution[]
+) {
+  if (resolutions.length === 0) {
+    throw new Error('At least one vendor resolution is required.');
+  }
+
+  return resolutions.reduce((bestResolution, resolution) =>
+    compareVendorResolutions(resolution, bestResolution) > 0 ? resolution : bestResolution
+  );
+}
+
 function classifyBundleStatus(report: EnterpriseReadinessReport) {
   const assessments = getAssessmentEntries(report).map(([, assessment]) => assessment);
   const hasUnknown = assessments.some((assessment) => assessment.status === 'unknown');
@@ -439,7 +464,7 @@ async function loadCachedVendorResolutionRowByKey(subjectKey: string) {
   return result.rows[0] ?? null;
 }
 
-async function loadCachedVendorResolutionRowsByCanonicalName(canonicalName: string) {
+async function loadCachedVendorResolutionRowsByKeys(subjectKeys: readonly string[]) {
   const result = await queryDatabase<CachedResolutionRow>(
     `
       select
@@ -450,10 +475,10 @@ async function loadCachedVendorResolutionRowsByCanonicalName(canonicalName: stri
         alternatives,
         rationale
       from subject_resolution_cache
-      where canonical_name = $1
+      where subject_key = any($1::text[])
         and expires_at > now()
     `,
-    [canonicalName]
+    [subjectKeys]
   );
 
   return result.rows;
@@ -486,13 +511,23 @@ function compareVendorResolutionRows(left: CachedResolutionRow, right: CachedRes
     return domainDelta;
   }
 
-  const leftIsCanonicalAlias =
+  const leftIsCanonicalEntry =
     normalizeSubjectCacheKey(left.requested_subject_name) === normalizeSubjectCacheKey(left.canonical_name);
-  const rightIsCanonicalAlias =
+  const rightIsCanonicalEntry =
     normalizeSubjectCacheKey(right.requested_subject_name) ===
     normalizeSubjectCacheKey(right.canonical_name);
 
-  return Number(leftIsCanonicalAlias) - Number(rightIsCanonicalAlias);
+  return Number(leftIsCanonicalEntry) - Number(rightIsCanonicalEntry);
+}
+
+function compareVendorResolutions(left: VendorResolution, right: VendorResolution) {
+  const confidenceDelta = getConfidenceRank(left.confidence) - getConfidenceRank(right.confidence);
+
+  if (confidenceDelta !== 0) {
+    return confidenceDelta;
+  }
+
+  return left.officialDomains.length - right.officialDomains.length;
 }
 
 function getConfidenceRank(confidence: VendorResolution['confidence']) {
