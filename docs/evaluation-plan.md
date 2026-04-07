@@ -260,6 +260,11 @@ evals/
     <timestamp>/
 ```
 
+The initial case schema and local validator should live at:
+
+- [evals/caseSchema.ts](../evals/caseSchema.ts)
+- [evals/validateCases.ts](../evals/validateCases.ts)
+
 Each case should be one JSON object in JSONL format.
 
 Suggested schema:
