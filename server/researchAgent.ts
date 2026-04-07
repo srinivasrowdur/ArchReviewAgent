@@ -6,6 +6,7 @@ import {
   IncompleteResearchError,
   InvalidVendorInputError,
   MissingOpenAIKeyError,
+  ResearchDecisionError,
   ResearchGenerationError,
   ResearchTimeoutError,
   VendorResolutionError
@@ -121,6 +122,10 @@ async function runResearchWorkflow(
 
     if (resolution) {
       resolutionSource = options.seededResolution ? 'seed' : 'cache';
+
+      if (!options.seededResolution) {
+        await tryStoreVendorResolution(runId, companyName, resolution);
+      }
     } else {
       resolution = await resolveVendorIdentity(companyName, startedAt, budgetMs);
       await tryStoreVendorResolution(runId, companyName, resolution);
@@ -488,6 +493,7 @@ export {
   IncompleteResearchError,
   InvalidVendorInputError,
   MissingOpenAIKeyError,
+  ResearchDecisionError,
   ResearchGenerationError,
   ResearchTimeoutError,
   VendorResolutionError

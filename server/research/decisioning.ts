@@ -1,7 +1,12 @@
 import { Agent, run } from '@openai/agents';
 import { z } from 'zod';
 import { normalizeHostname, type VendorResolution } from './vendorIntake.js';
-import { isAbortError, ResearchTimeoutError } from './errors.js';
+import {
+  isAbortError,
+  isInvalidStructuredOutputError,
+  ResearchDecisionError,
+  ResearchTimeoutError
+} from './errors.js';
 import {
   guardrailsSchema,
   normalizeIsoDate
@@ -159,6 +164,10 @@ export async function buildDecisionFromMemo(
   } catch (error) {
     if (isAbortError(error)) {
       throw new ResearchTimeoutError();
+    }
+
+    if (isInvalidStructuredOutputError(error)) {
+      throw new ResearchDecisionError();
     }
 
     throw error;

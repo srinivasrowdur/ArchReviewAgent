@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDecisionFromMemo } from './decisioning.js';
-import { ResearchTimeoutError } from './errors.js';
+import { ResearchDecisionError, ResearchTimeoutError } from './errors.js';
 import type { VendorResolution } from './vendorIntake.js';
 
 const resolution: VendorResolution = {
@@ -522,5 +522,30 @@ test('buildDecisionFromMemo maps decision-stage budget exhaustion to ResearchTim
         })
       ),
     (error: unknown) => error instanceof ResearchTimeoutError
+  );
+});
+
+test('buildDecisionFromMemo maps invalid structured output failures to ResearchDecisionError', async () => {
+  await assert.rejects(
+    () =>
+      buildDecisionFromMemo(
+        'Palantir',
+        'memo',
+        {
+          canonicalName: 'Palantir',
+          officialDomains: ['palantir.com'],
+          confidence: 'high',
+          alternatives: [],
+          rationale: 'Resolved to Palantir.'
+        },
+        Date.now(),
+        30_000,
+        async () => {
+          const error = new Error('Invalid output type');
+          error.name = 'ModelBehaviorError';
+          throw error;
+        }
+      ),
+    (error: unknown) => error instanceof ResearchDecisionError
   );
 });

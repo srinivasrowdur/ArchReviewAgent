@@ -9,6 +9,7 @@ import {
   IncompleteResearchError,
   InvalidVendorInputError,
   MissingOpenAIKeyError,
+  ResearchDecisionError,
   ResearchGenerationError,
   ResearchTimeoutError,
   VendorResolutionError,
@@ -209,6 +210,14 @@ function formatResearchError(error: unknown) {
       status: 502,
       message:
         'The live research run failed before producing a complete verdict. Retry once, or try a more specific vendor or product name.'
+    };
+  }
+
+  if (error instanceof ResearchDecisionError) {
+    return {
+      status: 502,
+      message:
+        'The live research run failed while forming a final verdict. Retry once, or try a more specific vendor or product name.'
     };
   }
 

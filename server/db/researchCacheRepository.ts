@@ -38,36 +38,17 @@ export async function loadCachedVendorResolution(requestedSubjectName: string) {
   }
 
   const subjectKey = normalizeSubjectCacheKey(requestedSubjectName);
-  const result = await queryDatabase<CachedResolutionRow>(
-    `
-      select
-        requested_subject_name,
-        canonical_name,
-        official_domains,
-        confidence,
-        alternatives,
-        rationale
-      from subject_resolution_cache
-      where subject_key = $1
-        and expires_at > now()
-      limit 1
-    `,
-    [subjectKey]
-  );
-
-  const row = result.rows[0];
+  const row = await loadCachedVendorResolutionRowByKey(subjectKey);
 
   if (!row) {
     return null;
   }
 
-  return {
-    canonicalName: row.canonical_name,
-    officialDomains: row.official_domains,
-    confidence: row.confidence,
-    alternatives: row.alternatives,
-    rationale: row.rationale
-  } satisfies VendorResolution;
+  const relatedRows = await loadCachedVendorResolutionRowsByCanonicalName(row.canonical_name);
+
+  return mapCachedVendorResolutionRow(
+    pickMostCompleteVendorResolutionRow(relatedRows.length > 0 ? relatedRows : [row])
+  );
 }
 
 export async function storeVendorResolution(
@@ -78,42 +59,59 @@ export async function storeVendorResolution(
     return;
   }
 
-  const subjectKey = normalizeSubjectCacheKey(requestedSubjectName);
   const expiresAt = new Date(Date.now() + getResolutionCacheTtlMs());
-
-  await queryDatabase(
-    `
-      insert into subject_resolution_cache (
-        subject_key,
-        requested_subject_name,
-        canonical_name,
-        official_domains,
-        confidence,
-        alternatives,
-        rationale,
-        expires_at
-      ) values ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8)
-      on conflict (subject_key) do update set
-        requested_subject_name = excluded.requested_subject_name,
-        canonical_name = excluded.canonical_name,
-        official_domains = excluded.official_domains,
-        confidence = excluded.confidence,
-        alternatives = excluded.alternatives,
-        rationale = excluded.rationale,
-        created_at = now(),
-        expires_at = excluded.expires_at
-    `,
-    [
-      subjectKey,
-      requestedSubjectName,
-      resolution.canonicalName,
-      JSON.stringify(resolution.officialDomains),
-      resolution.confidence,
-      JSON.stringify(resolution.alternatives),
-      resolution.rationale,
-      expiresAt.toISOString()
-    ]
+  const cacheEntries = buildVendorResolutionCacheEntries(
+    requestedSubjectName,
+    resolution.canonicalName
   );
+
+  await withDatabaseClient(async (client) => {
+    await queryWithClient(client, 'begin');
+
+    try {
+      for (const entry of cacheEntries) {
+        await queryWithClient(
+          client,
+          `
+            insert into subject_resolution_cache (
+              subject_key,
+              requested_subject_name,
+              canonical_name,
+              official_domains,
+              confidence,
+              alternatives,
+              rationale,
+              expires_at
+            ) values ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8)
+            on conflict (subject_key) do update set
+              requested_subject_name = excluded.requested_subject_name,
+              canonical_name = excluded.canonical_name,
+              official_domains = excluded.official_domains,
+              confidence = excluded.confidence,
+              alternatives = excluded.alternatives,
+              rationale = excluded.rationale,
+              created_at = now(),
+              expires_at = excluded.expires_at
+          `,
+          [
+            entry.subjectKey,
+            entry.requestedSubjectName,
+            resolution.canonicalName,
+            JSON.stringify(resolution.officialDomains),
+            resolution.confidence,
+            JSON.stringify(resolution.alternatives),
+            resolution.rationale,
+            expiresAt.toISOString()
+          ]
+        );
+      }
+
+      await queryWithClient(client, 'commit');
+    } catch (error) {
+      await queryWithClient(client, 'rollback');
+      throw error;
+    }
+  });
 }
 
 export async function loadAcceptedReportSnapshot(
@@ -341,6 +339,41 @@ export function normalizeSubjectCacheKey(value: string) {
     .trim();
 }
 
+export function buildVendorResolutionCacheEntries(
+  requestedSubjectName: string,
+  canonicalName: string
+) {
+  const requestedSubjectKey = normalizeSubjectCacheKey(requestedSubjectName);
+  const canonicalSubjectKey = normalizeSubjectCacheKey(canonicalName);
+  const entries = [
+    {
+      subjectKey: requestedSubjectKey,
+      requestedSubjectName
+    }
+  ];
+
+  if (canonicalSubjectKey !== requestedSubjectKey) {
+    entries.push({
+      subjectKey: canonicalSubjectKey,
+      requestedSubjectName: canonicalName
+    });
+  }
+
+  return entries;
+}
+
+export function pickMostCompleteVendorResolutionRow<T extends CachedResolutionRow>(
+  rows: readonly T[]
+) {
+  if (rows.length === 0) {
+    return null;
+  }
+
+  return rows.reduce((bestRow, row) =>
+    compareVendorResolutionRows(row, bestRow) > 0 ? row : bestRow
+  );
+}
+
 function classifyBundleStatus(report: EnterpriseReadinessReport) {
   const assessments = getAssessmentEntries(report).map(([, assessment]) => assessment);
   const hasUnknown = assessments.some((assessment) => assessment.status === 'unknown');
@@ -383,4 +416,93 @@ function normalizeIsoTimestamp(value: string) {
   }
 
   return new Date(parsed).toISOString();
+}
+
+async function loadCachedVendorResolutionRowByKey(subjectKey: string) {
+  const result = await queryDatabase<CachedResolutionRow>(
+    `
+      select
+        requested_subject_name,
+        canonical_name,
+        official_domains,
+        confidence,
+        alternatives,
+        rationale
+      from subject_resolution_cache
+      where subject_key = $1
+        and expires_at > now()
+      limit 1
+    `,
+    [subjectKey]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+async function loadCachedVendorResolutionRowsByCanonicalName(canonicalName: string) {
+  const result = await queryDatabase<CachedResolutionRow>(
+    `
+      select
+        requested_subject_name,
+        canonical_name,
+        official_domains,
+        confidence,
+        alternatives,
+        rationale
+      from subject_resolution_cache
+      where canonical_name = $1
+        and expires_at > now()
+    `,
+    [canonicalName]
+  );
+
+  return result.rows;
+}
+
+function mapCachedVendorResolutionRow(row: CachedResolutionRow | null) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    canonicalName: row.canonical_name,
+    officialDomains: row.official_domains,
+    confidence: row.confidence,
+    alternatives: row.alternatives,
+    rationale: row.rationale
+  } satisfies VendorResolution;
+}
+
+function compareVendorResolutionRows(left: CachedResolutionRow, right: CachedResolutionRow) {
+  const confidenceDelta = getConfidenceRank(left.confidence) - getConfidenceRank(right.confidence);
+
+  if (confidenceDelta !== 0) {
+    return confidenceDelta;
+  }
+
+  const domainDelta = left.official_domains.length - right.official_domains.length;
+
+  if (domainDelta !== 0) {
+    return domainDelta;
+  }
+
+  const leftIsCanonicalAlias =
+    normalizeSubjectCacheKey(left.requested_subject_name) === normalizeSubjectCacheKey(left.canonical_name);
+  const rightIsCanonicalAlias =
+    normalizeSubjectCacheKey(right.requested_subject_name) ===
+    normalizeSubjectCacheKey(right.canonical_name);
+
+  return Number(leftIsCanonicalAlias) - Number(rightIsCanonicalAlias);
+}
+
+function getConfidenceRank(confidence: VendorResolution['confidence']) {
+  switch (confidence) {
+    case 'high':
+      return 3;
+    case 'medium':
+      return 2;
+    case 'low':
+    default:
+      return 1;
+  }
 }

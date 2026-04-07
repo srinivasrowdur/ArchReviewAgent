@@ -26,6 +26,13 @@ export class ResearchGenerationError extends Error {
   }
 }
 
+export class ResearchDecisionError extends Error {
+  constructor() {
+    super('The live research run failed while producing a final structured verdict.');
+    this.name = 'ResearchDecisionError';
+  }
+}
+
 export class InvalidVendorInputError extends Error {
   constructor(message: string) {
     super(message);
@@ -52,5 +59,18 @@ export function isAbortError(error: unknown) {
       error.name === 'TimeoutError' ||
       error.name === 'APIUserAbortError' ||
       constructorName === 'APIUserAbortError')
+  );
+}
+
+export function isInvalidStructuredOutputError(error: unknown) {
+  const constructorName =
+    error && typeof error === 'object' && 'constructor' in error
+      ? (error.constructor as { name?: string }).name
+      : undefined;
+
+  return (
+    error instanceof Error &&
+    (error.name === 'ModelBehaviorError' || constructorName === 'ModelBehaviorError') &&
+    /invalid output type/i.test(error.message)
   );
 }
