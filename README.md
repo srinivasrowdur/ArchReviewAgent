@@ -45,6 +45,11 @@ The default `.env.example` is already configured for that local container:
 
 - `DATABASE_URL=postgres://archagent:archagent@localhost:55432/archagent`
 - the local Docker helper binds Postgres on `localhost:55432` to avoid common port conflicts
+- loopback browser origins such as `http://localhost:5173` are allowed automatically outside production
+
+For production, set `ALLOWED_ORIGINS` to the exact browser origin or origins that should be able to call the API, for example:
+
+- `ALLOWED_ORIGINS=https://your-app.example.com`
 
 Frontend: `http://localhost:5173`
 
