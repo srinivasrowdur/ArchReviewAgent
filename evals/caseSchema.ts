@@ -1,20 +1,15 @@
 import { z } from 'zod';
 
+const guardrailKeySchema = z.enum(['euDataResidency', 'enterpriseDeployment']);
 const allowedStatusSchema = z.enum([
   'supported',
   'partial',
   'unsupported',
   'unknown'
 ]);
-
 const allowedRecommendationSchema = z.enum(['green', 'yellow', 'red']);
 
-const expectedGuardrailSchema = z.object({
-  status: allowedStatusSchema,
-  allow_equivalents: z.array(allowedStatusSchema).optional().default([])
-});
-
-export const evalCaseSchema = z.object({
+const baseEvalCaseSchema = z.object({
   id: z
     .string()
     .trim()
@@ -23,7 +18,18 @@ export const evalCaseSchema = z.object({
       message: 'Case id must be kebab-case.'
     }),
   category: z.string().trim().min(1),
-  input: z.string().trim().min(2),
+  input: z.string().min(1),
+  notes: z.string().trim().min(1)
+});
+
+const expectedGuardrailSchema = z.object({
+  status: allowedStatusSchema,
+  allow_equivalents: z.array(allowedStatusSchema).optional().default([])
+});
+
+const successEvalCaseSchema = baseEvalCaseSchema.extend({
+  expected_outcome: z.literal('success'),
+  input: z.string().trim().min(2).max(120),
   expected_subject: z.string().trim().min(1),
   expected_vendor: z.string().trim().min(1),
   expected_official_domains: z.array(z.string().trim().min(1)).min(1),
@@ -32,8 +38,22 @@ export const evalCaseSchema = z.object({
     enterpriseDeployment: expectedGuardrailSchema
   }),
   expected_recommendation: allowedRecommendationSchema,
-  allowed_unknowns: z.array(z.enum(['euDataResidency', 'enterpriseDeployment'])),
-  notes: z.string().trim().min(1)
+  allowed_unknowns: z.array(guardrailKeySchema)
 });
 
+const rejectionEvalCaseSchema = baseEvalCaseSchema.extend({
+  expected_outcome: z.literal('rejection'),
+  expected_error: z.object({
+    status: z.number().int().min(400).max(499),
+    message_includes: z.string().trim().min(1)
+  })
+});
+
+export const evalCaseSchema = z.discriminatedUnion('expected_outcome', [
+  successEvalCaseSchema,
+  rejectionEvalCaseSchema
+]);
+
 export type EvalCase = z.infer<typeof evalCaseSchema>;
+export type EvalSuccessCase = z.infer<typeof successEvalCaseSchema>;
+export type EvalRejectionCase = z.infer<typeof rejectionEvalCaseSchema>;
