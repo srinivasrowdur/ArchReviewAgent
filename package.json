@@ -10,7 +10,9 @@
     "db:migrate": "node --import tsx server/db/migrate.ts",
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist-server/server/index.js",
-    "test:server": "node --import tsx --test server/**/*.test.ts"
+    "test:server": "node --import tsx --test server/**/*.test.ts",
+    "test:evals": "node --import tsx --test evals/validateCases.test.ts",
+    "evals:validate-cases": "node --import tsx evals/validateCases.ts"
   },
   "dependencies": {
     "@openai/agents": "^0.1.0",
