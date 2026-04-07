@@ -29,6 +29,7 @@ const expectedGuardrailSchema = z.object({
 
 const successEvalCaseSchema = baseEvalCaseSchema.extend({
   expected_outcome: z.literal('success'),
+  input: z.string().trim().min(2).max(120),
   expected_subject: z.string().trim().min(1),
   expected_vendor: z.string().trim().min(1),
   expected_official_domains: z.array(z.string().trim().min(1)).min(1),

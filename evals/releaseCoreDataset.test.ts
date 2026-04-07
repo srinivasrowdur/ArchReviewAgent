@@ -37,3 +37,32 @@ test('release-core dataset has the required minimum size and category coverage',
     );
   }
 });
+
+test('success cases cannot use inputs that violate intake minimum length after trim', async () => {
+  assert.throws(
+    () =>
+      evalCaseSchema.parse({
+        id: 'invalid-success-short-input',
+        category: 'input-validation',
+        input: ' x ',
+        expected_outcome: 'success',
+        expected_subject: 'Example',
+        expected_vendor: 'Example',
+        expected_official_domains: ['example.com'],
+        expected_guardrails: {
+          euDataResidency: {
+            status: 'supported',
+            allow_equivalents: []
+          },
+          enterpriseDeployment: {
+            status: 'supported',
+            allow_equivalents: []
+          }
+        },
+        expected_recommendation: 'green',
+        allowed_unknowns: [],
+        notes: 'Invalid success case for schema regression coverage.'
+      }),
+    /String must contain at least 2 character/
+  );
+});
