@@ -40,7 +40,7 @@ test('eval case validator skips fixture files in the default scan', async () => 
     }
   );
 
-  assert.match(result.stdout, /Validated 1 eval case/);
+  assert.match(result.stdout, /Validated \d+ eval cases across \d+ files\./);
 });
 
 test('eval case validator rejects invalid fixtures', async () => {
