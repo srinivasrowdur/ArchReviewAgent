@@ -46,6 +46,20 @@ test('guardrail quality grader runner reports targeted expectation mismatches', 
   );
 });
 
+test('guardrail quality grader runner rejects extra flags on passing cases', async () => {
+  const [fabricCase] = await loadGuardrailQualityCases([
+    'evals/cases/guardrail-quality-grader.jsonl'
+  ]);
+
+  const summary = await runGuardrailQualityGrader([fabricCase], async () => ({
+    ...createExpectedGrade(fabricCase),
+    flags: ['thin_evidence']
+  }));
+
+  assert.equal(summary.totals.failed, 1);
+  assert.match(summary.results[0]?.detail ?? '', /unexpected extra flag thin_evidence/);
+});
+
 test('guardrail quality grader allows injected runners without OPENAI_API_KEY', async () => {
   const [fabricCase] = await loadGuardrailQualityCases([
     'evals/cases/guardrail-quality-grader.jsonl'

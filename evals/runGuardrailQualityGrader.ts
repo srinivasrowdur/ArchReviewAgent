@@ -153,6 +153,16 @@ function collectExpectationMismatches(
     }
   }
 
+  if (testCase.expected.pass) {
+    const allowedFlags = new Set(testCase.expected.requiredFlags);
+
+    for (const actualFlag of grade.flags) {
+      if (!allowedFlags.has(actualFlag)) {
+        mismatches.push(`unexpected extra flag ${actualFlag}.`);
+      }
+    }
+  }
+
   if (
     !matchesExpectedValue(
       testCase.expected.expectedEuResidencySupport,
