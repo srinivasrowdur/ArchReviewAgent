@@ -1,6 +1,6 @@
 import { Agent, run } from '@openai/agents';
 import { z } from 'zod';
-import { normalizeHostname, type VendorResolution } from './vendorIntake.js';
+import { type VendorResolution } from './vendorIntake.js';
 import {
   isAbortError,
   isInvalidStructuredOutputError,
@@ -11,6 +11,7 @@ import {
   guardrailsSchema,
   normalizeIsoDate
 } from './reportSchema.js';
+import { normalizeEvidenceUrl } from './sourceSafety.js';
 
 const rawEvidenceItemSchema = z.object({
   title: z.string().min(1).max(400),
@@ -611,42 +612,6 @@ function deriveRecommendationFromStatuses(
   }
 
   return 'green';
-}
-
-function normalizeEvidenceUrl(url: string, allowedDomains: string[]) {
-  try {
-    const parsed = new URL(url);
-
-    parsed.hash = '';
-    ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'].forEach((key) =>
-      parsed.searchParams.delete(key)
-    );
-
-    if (!isAllowedVendorHostname(parsed.hostname, allowedDomains)) {
-      return '';
-    }
-
-    const normalized = `${parsed.origin}${parsed.pathname}${parsed.search ? parsed.search : ''}`.replace(
-      /\/$/,
-      ''
-    );
-
-    return normalized;
-  } catch {
-    return '';
-  }
-}
-
-function isAllowedVendorHostname(hostname: string, allowedDomains: string[]) {
-  const normalizedHostname = normalizeHostname(hostname);
-
-  if (!normalizedHostname) {
-    return false;
-  }
-
-  return allowedDomains.some(
-    (domain) => normalizedHostname === domain || normalizedHostname.endsWith(`.${domain}`)
-  );
 }
 
 function evidenceTitleFromUrl(url: string) {
