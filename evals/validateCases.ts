@@ -3,6 +3,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { ZodError } from 'zod';
 import { evalCaseSchema } from './caseSchema.js';
+import { cacheSourceCaseSchema } from './cacheSourceCaseSchema.js';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -42,7 +43,7 @@ async function main() {
       }
 
       try {
-        evalCaseSchema.parse(parsedJson);
+        parseKnownEvalCase(parsedJson);
       } catch (error) {
         if (error instanceof ZodError) {
           const details = error.issues
@@ -62,6 +63,36 @@ async function main() {
   console.log(
     `Validated ${checkedCases} eval case${checkedCases === 1 ? '' : 's'} across ${jsonlFiles.length} file${jsonlFiles.length === 1 ? '' : 's'}.`
   );
+}
+
+function parseKnownEvalCase(parsedJson: unknown) {
+  if (hasExpectedOutcome(parsedJson)) {
+    return evalCaseSchema.parse(parsedJson);
+  }
+
+  if (hasCategory(parsedJson)) {
+    return cacheSourceCaseSchema.parse(parsedJson);
+  }
+
+  try {
+    return evalCaseSchema.parse(parsedJson);
+  } catch (releaseError) {
+    if (!(releaseError instanceof ZodError)) {
+      throw releaseError;
+    }
+
+    return cacheSourceCaseSchema.parse(parsedJson);
+  }
+}
+
+function hasExpectedOutcome(
+  value: unknown
+): value is { expected_outcome: unknown } {
+  return typeof value === 'object' && value !== null && 'expected_outcome' in value;
+}
+
+function hasCategory(value: unknown): value is { category: unknown } {
+  return typeof value === 'object' && value !== null && 'category' in value;
 }
 
 type CollectJsonlOptions = {
