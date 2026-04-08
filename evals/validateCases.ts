@@ -5,6 +5,7 @@ import { ZodError } from 'zod';
 import { evalCaseSchema } from './caseSchema.js';
 import { cacheSourceCaseSchema } from './cacheSourceCaseSchema.js';
 import { publicSurfaceCaseSchema } from './publicSurfaceCaseSchema.js';
+import { guardrailQualityCaseSchema } from './graders/guardrailQualityCaseSchema.js';
 import { productResolutionGraderCaseSchema } from './graders/productResolutionCaseSchema.js';
 
 async function main() {
@@ -73,7 +74,7 @@ function parseKnownEvalCase(parsedJson: unknown) {
   }
 
   if (hasGrader(parsedJson)) {
-    return productResolutionGraderCaseSchema.parse(parsedJson);
+    return parseKnownGraderCase(parsedJson);
   }
 
   if (hasCategory(parsedJson)) {
@@ -97,6 +98,18 @@ function parseKnownEvalCase(parsedJson: unknown) {
 
     return cacheSourceCaseSchema.parse(parsedJson);
   }
+}
+
+function parseKnownGraderCase(parsedJson: { grader: unknown }) {
+  if (parsedJson.grader === 'product-resolution') {
+    return productResolutionGraderCaseSchema.parse(parsedJson);
+  }
+
+  if (parsedJson.grader === 'guardrail-quality') {
+    return guardrailQualityCaseSchema.parse(parsedJson);
+  }
+
+  throw new Error(`Unknown grader type: ${String(parsedJson.grader)}`);
 }
 
 function hasExpectedOutcome(
