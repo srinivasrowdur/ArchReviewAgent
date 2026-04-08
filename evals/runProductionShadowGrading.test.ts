@@ -120,6 +120,64 @@ test('production shadow grading writes JSON and markdown reports to a stable out
   assert.match(markdownContent, /## Totals/);
 });
 
+test('production shadow grading preserves drift baseline across failed null-recommendation traces', async () => {
+  const traces = [
+    createTrace({
+      runId: 'miro-green',
+      requestedSubjectName: 'Miro',
+      subjectKey: 'miro',
+      recommendation: 'green',
+      createdAt: '2026-04-08T09:00:00.000Z'
+    }),
+    createTrace({
+      runId: 'miro-failed',
+      requestedSubjectName: 'Miro',
+      subjectKey: 'miro',
+      recommendation: null,
+      euStatus: null,
+      enterpriseStatus: null,
+      createdAt: '2026-04-08T10:00:00.000Z',
+      report: null,
+      outcome: 'failed',
+      errorMessage: 'Research failed.'
+    }),
+    createTrace({
+      runId: 'miro-red',
+      requestedSubjectName: 'Miro',
+      subjectKey: 'miro',
+      recommendation: 'red',
+      createdAt: '2026-04-08T11:00:00.000Z'
+    })
+  ];
+
+  const summary = await runProductionShadowGrading(traces, {
+    gradeProductResolution: async () => ({
+      pass: true,
+      score: 0.9,
+      reason: 'Looks good.',
+      flags: [],
+      subjectAnchoring: 'same-brand',
+      subjectResolutionQuality: 'strong',
+      overviewSpecificity: 'specific'
+    }),
+    gradeGuardrailQuality: async () => ({
+      pass: true,
+      score: 0.85,
+      reason: 'Looks supported.',
+      flags: [],
+      euResidencyVerdictSupport: 'strong',
+      enterpriseDeploymentVerdictSupport: 'strong',
+      recommendationQuality: 'justified',
+      citationRelevance: 'strong'
+    })
+  });
+
+  assert.deepEqual(summary.recommendationChangedRunIds, ['miro-red']);
+  const redRun = summary.gradedRuns.find((run) => run.runId === 'miro-red');
+  assert.equal(redRun?.previousRecommendation, 'green');
+  assert.equal(redRun?.recommendationChanged, true);
+});
+
 function createTrace(
   overrides: Partial<StoredResearchRunTrace> & {
     runId: string;

@@ -329,7 +329,10 @@ function buildPreviousRecommendationMap(traces: StoredResearchRunTrace[]) {
   for (const trace of [...traces].sort((left, right) => compareCreatedAtAsc(left.createdAt, right.createdAt))) {
     const subjectIdentity = trace.subjectKey ?? trace.requestedSubjectName.trim().toLowerCase();
     previousRecommendationByTrace.set(trace.runId, previousBySubject.get(subjectIdentity) ?? null);
-    previousBySubject.set(subjectIdentity, trace.recommendation);
+
+    if (trace.outcome === 'succeeded' && trace.recommendation) {
+      previousBySubject.set(subjectIdentity, trace.recommendation);
+    }
   }
 
   return previousRecommendationByTrace;
