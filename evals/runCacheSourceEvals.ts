@@ -13,8 +13,8 @@ import {
 } from '../server/research/sourceSafety.js';
 
 type EvalResult =
-  | { caseId: string; category: CacheSourceCase['category']; outcome: 'passed'; detail: string }
-  | { caseId: string; category: CacheSourceCase['category']; outcome: 'failed'; detail: string };
+  | { caseId: string; category: CacheSourceCase['category']; outcome: 'passed'; detail: string; durationMs: number }
+  | { caseId: string; category: CacheSourceCase['category']; outcome: 'failed'; detail: string; durationMs: number };
 
 type EvalSummary = {
   totals: {
@@ -73,6 +73,8 @@ async function loadCases(inputPaths: string[]) {
 }
 
 function runCase(testCase: CacheSourceCase): EvalResult {
+  const startedAt = Date.now();
+
   try {
     switch (testCase.category) {
       case 'cache-promotion': {
@@ -86,7 +88,11 @@ function runCase(testCase: CacheSourceCase): EvalResult {
           );
         }
 
-        return passed(testCase, 'Cache promotion decision matched expected output.');
+        return passed(
+          testCase,
+          'Cache promotion decision matched expected output.',
+          Date.now() - startedAt
+        );
       }
 
       case 'cache-convergence': {
@@ -108,7 +114,11 @@ function runCase(testCase: CacheSourceCase): EvalResult {
           'winning domain set mismatch'
         );
 
-        return passed(testCase, 'Cache-key convergence and strongest-row selection matched expected output.');
+        return passed(
+          testCase,
+          'Cache-key convergence and strongest-row selection matched expected output.',
+          Date.now() - startedAt
+        );
       }
 
       case 'source-safety': {
@@ -121,7 +131,11 @@ function runCase(testCase: CacheSourceCase): EvalResult {
         assertEqual(normalizedUrl, testCase.expected.normalizedUrl, 'normalized URL mismatch');
         assertEqual(hostnameAllowed, testCase.expected.allowed, 'hostname allow result mismatch');
 
-        return passed(testCase, 'Source-safety normalization matched expected output.');
+        return passed(
+          testCase,
+          'Source-safety normalization matched expected output.',
+          Date.now() - startedAt
+        );
       }
     }
   } catch (error) {
@@ -129,17 +143,23 @@ function runCase(testCase: CacheSourceCase): EvalResult {
       caseId: testCase.id,
       category: testCase.category,
       outcome: 'failed',
-      detail: error instanceof Error ? error.message : String(error)
+      detail: error instanceof Error ? error.message : String(error),
+      durationMs: Date.now() - startedAt
     };
   }
 }
 
-function passed(testCase: CacheSourceCase, detail: string): EvalResult {
+function passed(
+  testCase: CacheSourceCase,
+  detail: string,
+  durationMs: number
+): EvalResult {
   return {
     caseId: testCase.id,
     category: testCase.category,
     outcome: 'passed',
-    detail
+    detail,
+    durationMs
   };
 }
 
@@ -173,7 +193,8 @@ main().catch((error) => {
         caseId: '<runner>',
         category: 'cache-promotion',
         outcome: 'failed',
-        detail: error instanceof Error ? error.message : String(error)
+        detail: error instanceof Error ? error.message : String(error),
+        durationMs: 0
       }
     ]
   };

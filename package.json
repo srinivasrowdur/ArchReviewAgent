@@ -11,11 +11,12 @@
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist-server/server/index.js",
     "test:server": "node --import tsx --test server/**/*.test.ts",
-    "test:evals": "node --import tsx --test evals/validateCases.test.ts evals/releaseCoreDataset.test.ts evals/runDeterministicReleaseEvals.test.ts evals/runCacheSourceEvals.test.ts evals/runPublicSurfaceEvals.test.ts",
+    "test:evals": "node --import tsx --test evals/validateCases.test.ts evals/releaseCoreDataset.test.ts evals/runDeterministicReleaseEvals.test.ts evals/runCacheSourceEvals.test.ts evals/runPublicSurfaceEvals.test.ts evals/compareBranchVsMain.test.ts",
     "evals:validate-cases": "node --import tsx evals/validateCases.ts",
     "evals:run-deterministic-release": "node --import tsx evals/runDeterministicReleaseEvals.ts",
     "evals:run-cache-source": "node --import tsx evals/runCacheSourceEvals.ts",
-    "evals:run-public-surface": "node --import tsx evals/runPublicSurfaceEvals.ts"
+    "evals:run-public-surface": "node --import tsx evals/runPublicSurfaceEvals.ts",
+    "evals:compare-branch-vs-main": "node --import tsx evals/compareBranchVsMain.ts"
   },
   "dependencies": {
     "@openai/agents": "^0.1.0",
