@@ -4,6 +4,7 @@ import process from 'node:process';
 import { ZodError } from 'zod';
 import { evalCaseSchema } from './caseSchema.js';
 import { cacheSourceCaseSchema } from './cacheSourceCaseSchema.js';
+import { publicSurfaceCaseSchema } from './publicSurfaceCaseSchema.js';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -71,7 +72,15 @@ function parseKnownEvalCase(parsedJson: unknown) {
   }
 
   if (hasCategory(parsedJson)) {
-    return cacheSourceCaseSchema.parse(parsedJson);
+    if (isCacheSourceCategory(parsedJson.category)) {
+      return cacheSourceCaseSchema.parse(parsedJson);
+    }
+
+    if (isPublicSurfaceCategory(parsedJson.category)) {
+      return publicSurfaceCaseSchema.parse(parsedJson);
+    }
+
+    return publicSurfaceCaseSchema.parse(parsedJson);
   }
 
   try {
@@ -93,6 +102,22 @@ function hasExpectedOutcome(
 
 function hasCategory(value: unknown): value is { category: unknown } {
   return typeof value === 'object' && value !== null && 'category' in value;
+}
+
+function isCacheSourceCategory(value: unknown) {
+  return (
+    value === 'cache-promotion' ||
+    value === 'cache-convergence' ||
+    value === 'source-safety'
+  );
+}
+
+function isPublicSurfaceCategory(value: unknown) {
+  return (
+    value === 'cors' ||
+    value === 'security-headers' ||
+    value === 'endpoint-exposure'
+  );
 }
 
 type CollectJsonlOptions = {
