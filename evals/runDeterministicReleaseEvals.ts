@@ -21,18 +21,24 @@ type EvalResult =
       category: string;
       outcome: 'passed';
       detail: string;
+      durationMs: number;
+      snapshot?: SuccessSnapshot;
     }
   | {
       caseId: string;
       category: string;
       outcome: 'failed';
       detail: string;
+      durationMs: number;
+      snapshot?: SuccessSnapshot;
     }
   | {
       caseId: string;
       category: string;
       outcome: 'skipped';
       detail: string;
+      durationMs: number;
+      snapshot?: SuccessSnapshot;
     };
 
 type EvalSummary = {
@@ -43,6 +49,18 @@ type EvalSummary = {
     skipped: number;
   };
   results: EvalResult[];
+};
+
+type SuccessSnapshot = {
+  recommendation: 'green' | 'yellow' | 'red';
+  guardrails: {
+    euDataResidency: {
+      status: 'supported' | 'partial' | 'unsupported' | 'unknown';
+    };
+    enterpriseDeployment: {
+      status: 'supported' | 'partial' | 'unsupported' | 'unknown';
+    };
+  };
 };
 
 async function main() {
@@ -90,6 +108,8 @@ async function loadEvalCases(inputPaths: string[]) {
 }
 
 function runCase(evalCase: EvalCase): EvalResult {
+  const startedAt = Date.now();
+
   if (evalCase.expected_outcome === 'success') {
     try {
       const report = createMockReport(evalCase.input);
@@ -135,7 +155,9 @@ function runCase(evalCase: EvalCase): EvalResult {
         caseId: evalCase.id,
         category: evalCase.category,
         outcome: 'passed',
-        detail: 'Deterministic success assertions passed.'
+        detail: 'Deterministic success assertions passed.',
+        durationMs: Date.now() - startedAt,
+        snapshot: buildSuccessSnapshot(report)
       };
     } catch (error) {
       return {
@@ -145,18 +167,20 @@ function runCase(evalCase: EvalCase): EvalResult {
         detail: describeError(
           error,
           'Deterministic success assertions did not pass.'
-        )
+        ),
+        durationMs: Date.now() - startedAt
       };
     }
   }
 
-  const rejectionCheck = evaluateRejectedCase(evalCase);
+  const rejectionCheck = evaluateRejectedCase(evalCase, startedAt);
 
   return rejectionCheck;
 }
 
 function evaluateRejectedCase(
-  evalCase: Extract<EvalCase, { expected_outcome: 'rejection' }>
+  evalCase: Extract<EvalCase, { expected_outcome: 'rejection' }>,
+  startedAt: number
 ): EvalResult {
   try {
     let formattedError: ReturnType<typeof formatResearchError> | null = null;
@@ -184,7 +208,8 @@ function evaluateRejectedCase(
         category: evalCase.category,
         outcome: 'failed',
         detail:
-          `Expected a ${evalCase.expected_error.status} rejection containing "${evalCase.expected_error.message_includes}", but no error was produced.`
+          `Expected a ${evalCase.expected_error.status} rejection containing "${evalCase.expected_error.message_includes}", but no error was produced.`,
+        durationMs: Date.now() - startedAt
       };
     }
 
@@ -194,7 +219,8 @@ function evaluateRejectedCase(
         category: evalCase.category,
         outcome: 'failed',
         detail:
-          `Expected rejection status ${evalCase.expected_error.status}, got ${formattedError.status}.`
+          `Expected rejection status ${evalCase.expected_error.status}, got ${formattedError.status}.`,
+        durationMs: Date.now() - startedAt
       };
     }
 
@@ -207,16 +233,34 @@ function evaluateRejectedCase(
           : 'failed',
       detail: formattedError.message.includes(evalCase.expected_error.message_includes)
         ? 'Deterministic rejection assertions passed.'
-        : `Expected rejection message containing "${evalCase.expected_error.message_includes}", got "${formattedError.message}".`
+        : `Expected rejection message containing "${evalCase.expected_error.message_includes}", got "${formattedError.message}".`,
+      durationMs: Date.now() - startedAt
     };
   } catch (error) {
     return {
       caseId: evalCase.id,
       category: evalCase.category,
       outcome: 'failed',
-      detail: describeError(error, 'Deterministic rejection assertions did not pass.')
+      detail: describeError(error, 'Deterministic rejection assertions did not pass.'),
+      durationMs: Date.now() - startedAt
     };
   }
+}
+
+function buildSuccessSnapshot(
+  report: typeof enterpriseReadinessReportSchema._type
+): SuccessSnapshot {
+  return {
+    recommendation: report.recommendation,
+    guardrails: {
+      euDataResidency: {
+        status: report.guardrails.euDataResidency.status
+      },
+      enterpriseDeployment: {
+        status: report.guardrails.enterpriseDeployment.status
+      }
+    }
+  };
 }
 
 function buildSummary(results: EvalResult[]): EvalSummary {
@@ -293,7 +337,8 @@ main().catch((error) => {
         caseId: '<runner>',
         category: 'infrastructure',
         outcome: 'failed',
-        detail: error instanceof Error ? error.message : String(error)
+        detail: error instanceof Error ? error.message : String(error),
+        durationMs: 0
       }
     ]
   };

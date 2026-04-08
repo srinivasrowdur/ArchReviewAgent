@@ -13,12 +13,14 @@ type EvalResult =
       category: PublicSurfaceCase['category'];
       outcome: 'passed';
       detail: string;
+      durationMs: number;
     }
   | {
       caseId: string;
       category: PublicSurfaceCase['category'];
       outcome: 'failed';
       detail: string;
+      durationMs: number;
     };
 
 type EvalSummary = {
@@ -131,6 +133,8 @@ async function runCase(
   baseUrl: string,
   testCase: PublicSurfaceCase
 ): Promise<EvalResult> {
+  const startedAt = Date.now();
+
   try {
     const headers = new Headers(testCase.request.headers);
     const requestInit: RequestInit = {
@@ -195,14 +199,16 @@ async function runCase(
       caseId: testCase.id,
       category: testCase.category,
       outcome: 'passed',
-      detail: 'Public surface behavior matched expected output.'
+      detail: 'Public surface behavior matched expected output.',
+      durationMs: Date.now() - startedAt
     };
   } catch (error) {
     return {
       caseId: testCase.id,
       category: testCase.category,
       outcome: 'failed',
-      detail: error instanceof Error ? error.message : String(error)
+      detail: error instanceof Error ? error.message : String(error),
+      durationMs: Date.now() - startedAt
     };
   }
 }
@@ -244,7 +250,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           caseId: '<runner>',
           category: 'endpoint-exposure',
           outcome: 'failed',
-          detail: error instanceof Error ? error.message : String(error)
+          detail: error instanceof Error ? error.message : String(error),
+          durationMs: 0
         }
       ]
     };
