@@ -138,7 +138,33 @@ export function compareSuiteExecutions(
     const baselineEntry = baselineResults.get(key);
     const candidateEntry = candidateResults.get(key);
 
-    if (!baselineEntry || !candidateEntry) {
+    if (!baselineEntry && candidateEntry) {
+      if (candidateEntry.result.outcome === 'failed') {
+        newFailures.push({
+          suiteId: candidateEntry.suiteId,
+          caseId: candidateEntry.result.caseId,
+          category: candidateEntry.result.category,
+          baselineOutcome: 'missing',
+          candidateOutcome: candidateEntry.result.outcome,
+          detail: candidateEntry.result.detail
+        });
+      }
+
+      continue;
+    }
+
+    if (baselineEntry && !candidateEntry) {
+      if (baselineEntry.result.outcome === 'failed') {
+        resolvedFailures.push({
+          suiteId: baselineEntry.suiteId,
+          caseId: baselineEntry.result.caseId,
+          category: baselineEntry.result.category,
+          baselineOutcome: baselineEntry.result.outcome,
+          candidateOutcome: 'missing',
+          detail: baselineEntry.result.detail
+        });
+      }
+
       continue;
     }
 

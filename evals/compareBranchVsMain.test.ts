@@ -167,6 +167,79 @@ test('compareSuiteExecutions highlights new failures, recommendation drift, new 
   assert.match(markdown, /New Unknown Outputs/);
 });
 
+test('compareSuiteExecutions records unmatched failed cases instead of dropping them', () => {
+  const baselineSuites = [
+    {
+      suiteId: 'public-surface',
+      cwd: '/baseline',
+      durationMs: 10,
+      summary: {
+        totals: {
+          cases: 1,
+          passed: 0,
+          failed: 1
+        },
+        results: [
+          {
+            caseId: 'runner-failure',
+            category: 'endpoint-exposure',
+            outcome: 'failed' as const,
+            detail: 'baseline failed',
+            durationMs: 3
+          }
+        ]
+      }
+    }
+  ];
+
+  const candidateSuites = [
+    {
+      suiteId: 'public-surface',
+      cwd: '/candidate',
+      durationMs: 10,
+      summary: {
+        totals: {
+          cases: 1,
+          passed: 0,
+          failed: 1
+        },
+        results: [
+          {
+            caseId: '<runner>',
+            category: 'endpoint-exposure',
+            outcome: 'failed' as const,
+            detail: 'candidate runner failed',
+            durationMs: 1
+          }
+        ]
+      }
+    }
+  ];
+
+  const comparison = compareSuiteExecutions(baselineSuites, candidateSuites);
+
+  assert.deepEqual(comparison.newFailures, [
+    {
+      suiteId: 'public-surface',
+      caseId: '<runner>',
+      category: 'endpoint-exposure',
+      baselineOutcome: 'missing',
+      candidateOutcome: 'failed',
+      detail: 'candidate runner failed'
+    }
+  ]);
+  assert.deepEqual(comparison.resolvedFailures, [
+    {
+      suiteId: 'public-surface',
+      caseId: 'runner-failure',
+      category: 'endpoint-exposure',
+      baselineOutcome: 'failed',
+      candidateOutcome: 'missing',
+      detail: 'baseline failed'
+    }
+  ]);
+});
+
 test('compareBranchVsMain runner writes JSON and Markdown reports for identical code trees', async () => {
   const outputDir = await mkdtemp(path.join(os.tmpdir(), 'archagent-compare-'));
   const result = await execFileAsync(
