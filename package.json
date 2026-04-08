@@ -8,6 +8,7 @@
     "dev:client": "vite --host 0.0.0.0",
     "dev:server": "tsx watch server/index.ts",
     "db:migrate": "node --import tsx server/db/migrate.ts",
+    "traces:inspect": "node --import tsx server/db/inspectResearchRunTraces.ts",
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist-server/server/index.js",
     "test:server": "node --import tsx --test server/**/*.test.ts",
