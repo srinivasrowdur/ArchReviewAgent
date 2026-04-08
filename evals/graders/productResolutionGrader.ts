@@ -5,6 +5,11 @@ import { getEvalModelSetting } from '../modelConfig.js';
 import type { ProductResolutionGraderCase } from './productResolutionCaseSchema.js';
 import { productResolutionFlagSchema } from './productResolutionCaseSchema.js';
 
+export type ProductResolutionGraderInput = Pick<
+  ProductResolutionGraderCase,
+  'requestedSubject' | 'resolvedVendor' | 'report'
+>;
+
 export const productResolutionGradeSchema = z.object({
   pass: z.boolean(),
   score: z.number().min(0).max(1),
@@ -33,6 +38,19 @@ export async function gradeProductResolutionCase(
     runGrader?: GraderRunFn;
   } = {}
 ): Promise<ProductResolutionGrade> {
+  return gradeProductResolutionInput(testCase, { model, runGrader });
+}
+
+export async function gradeProductResolutionInput(
+  input: ProductResolutionGraderInput,
+  {
+    model = getEvalModelSetting().value,
+    runGrader = run
+  }: {
+    model?: string;
+    runGrader?: GraderRunFn;
+  } = {}
+): Promise<ProductResolutionGrade> {
   if (runGrader === run && !process.env.OPENAI_API_KEY?.trim()) {
     throw new MissingOpenAIKeyError();
   }
@@ -42,7 +60,7 @@ export async function gradeProductResolutionCase(
   try {
     const result = await runGrader(
       graderAgent,
-      buildProductResolutionPrompt(testCase),
+      buildProductResolutionPrompt(input),
       {
         maxTurns: 4,
         signal: AbortSignal.timeout(25_000)
@@ -97,24 +115,23 @@ Requirements:
   });
 }
 
-function buildProductResolutionPrompt(testCase: ProductResolutionGraderCase) {
+function buildProductResolutionPrompt(input: ProductResolutionGraderInput) {
   return `
 Grade whether this report stayed anchored to the requested product and whether the product overview is specific enough for an analyst.
 
 Case input:
 ${JSON.stringify(
     {
-      requestedSubject: testCase.requestedSubject,
-      resolvedVendor: testCase.resolvedVendor,
+      requestedSubject: input.requestedSubject,
+      resolvedVendor: input.resolvedVendor,
       report: {
-        companyName: testCase.report.companyName,
-        overview: testCase.report.overview,
-        executiveSummary: testCase.report.executiveSummary,
-        deploymentVerdict: testCase.report.deploymentVerdict,
+        companyName: input.report.companyName,
+        overview: input.report.overview,
+        executiveSummary: input.report.executiveSummary,
+        deploymentVerdict: input.report.deploymentVerdict,
         evidence: {
-          euDataResidency: testCase.report.guardrails.euDataResidency.evidence,
-          enterpriseDeployment:
-            testCase.report.guardrails.enterpriseDeployment.evidence
+          euDataResidency: input.report.guardrails.euDataResidency.evidence,
+          enterpriseDeployment: input.report.guardrails.enterpriseDeployment.evidence
         }
       }
     },

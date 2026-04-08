@@ -105,6 +105,13 @@ npm run traces:inspect -- --limit 5
 npm run traces:inspect -- --run-id <run_id>
 ```
 
+To run offline shadow grading against stored or sample traces:
+
+```bash
+npm run evals:run-production-shadow-grading -- --limit 10
+npm run evals:run-production-shadow-grading -- --input-file evals/cases/_fixtures/shadow-traces.sample.jsonl
+```
+
 In production:
 
 - `/api/health` returns only a minimal liveness response

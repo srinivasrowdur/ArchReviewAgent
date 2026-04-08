@@ -5,6 +5,11 @@ import { getEvalModelSetting } from '../modelConfig.js';
 import type { GuardrailQualityCase } from './guardrailQualityCaseSchema.js';
 import { guardrailQualityFlagSchema } from './guardrailQualityCaseSchema.js';
 
+export type GuardrailQualityGraderInput = Pick<
+  GuardrailQualityCase,
+  'requestedSubject' | 'report'
+>;
+
 export const guardrailQualityGradeSchema = z.object({
   pass: z.boolean(),
   score: z.number().min(0).max(1),
@@ -34,6 +39,19 @@ export async function gradeGuardrailQualityCase(
     runGrader?: GraderRunFn;
   } = {}
 ): Promise<GuardrailQualityGrade> {
+  return gradeGuardrailQualityInput(testCase, { model, runGrader });
+}
+
+export async function gradeGuardrailQualityInput(
+  input: GuardrailQualityGraderInput,
+  {
+    model = getEvalModelSetting().value,
+    runGrader = run
+  }: {
+    model?: string;
+    runGrader?: GraderRunFn;
+  } = {}
+): Promise<GuardrailQualityGrade> {
   if (runGrader === run && !process.env.OPENAI_API_KEY?.trim()) {
     throw new MissingOpenAIKeyError();
   }
@@ -43,7 +61,7 @@ export async function gradeGuardrailQualityCase(
   try {
     const result = await runGrader(
       graderAgent,
-      buildGuardrailQualityPrompt(testCase),
+      buildGuardrailQualityPrompt(input),
       {
         maxTurns: 4,
         signal: AbortSignal.timeout(40_000)
@@ -103,19 +121,19 @@ Requirements:
   });
 }
 
-function buildGuardrailQualityPrompt(testCase: GuardrailQualityCase) {
+function buildGuardrailQualityPrompt(input: GuardrailQualityGraderInput) {
   return `
 Grade whether this report's guardrail verdicts and overall recommendation are supported by the cited evidence.
 
 Case input:
 ${JSON.stringify(
     {
-      requestedSubject: testCase.requestedSubject,
+      requestedSubject: input.requestedSubject,
       report: {
-        companyName: testCase.report.companyName,
-        recommendation: testCase.report.recommendation,
-        deploymentVerdict: testCase.report.deploymentVerdict,
-        guardrails: testCase.report.guardrails
+        companyName: input.report.companyName,
+        recommendation: input.report.recommendation,
+        deploymentVerdict: input.report.deploymentVerdict,
+        guardrails: input.report.guardrails
       }
     },
     null,
