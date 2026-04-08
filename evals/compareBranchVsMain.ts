@@ -5,6 +5,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { getEvalModelSetting } from './modelConfig.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -344,7 +345,7 @@ export async function generateBranchVsMainComparison(
     outputDir ?? path.join(normalizedCandidateDir, 'evals', 'reports', timestamp);
   await mkdir(reportsDir, { recursive: true });
 
-  const modelSetting = getModelSetting();
+  const modelSetting = getEvalModelSetting();
   const baselineWorkspace =
     baselineDir ? await useExistingWorkspace(baselineDir) : await createBaselineWorktree(baselineRef);
 
@@ -497,27 +498,6 @@ function appendSection(
 
 function formatSignedMs(value: number) {
   return `${value >= 0 ? '+' : ''}${value}ms`;
-}
-
-function getModelSetting() {
-  if (process.env.EVAL_MODEL?.trim()) {
-    return {
-      value: process.env.EVAL_MODEL.trim(),
-      source: 'EVAL_MODEL' as const
-    };
-  }
-
-  if (process.env.OPENAI_MODEL?.trim()) {
-    return {
-      value: process.env.OPENAI_MODEL.trim(),
-      source: 'OPENAI_MODEL' as const
-    };
-  }
-
-  return {
-    value: 'not-set',
-    source: 'unset' as const
-  };
 }
 
 async function createBaselineWorktree(baselineRef: string) {
