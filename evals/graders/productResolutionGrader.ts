@@ -33,7 +33,7 @@ export async function gradeProductResolutionCase(
     runGrader?: GraderRunFn;
   } = {}
 ): Promise<ProductResolutionGrade> {
-  if (!process.env.OPENAI_API_KEY?.trim()) {
+  if (runGrader === run && !process.env.OPENAI_API_KEY?.trim()) {
     throw new MissingOpenAIKeyError();
   }
 

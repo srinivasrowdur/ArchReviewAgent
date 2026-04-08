@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { gradeProductResolutionCase } from './graders/productResolutionGrader.js';
 import {
   loadProductResolutionCases,
   runProductResolutionGrader
@@ -39,6 +40,32 @@ test('product resolution grader runner reports targeted expectation mismatches',
   assert.equal(summary.results[0]?.caseId, fabricCase.id);
   assert.match(summary.results[0]?.detail ?? '', /expected pass=true/);
   assert.match(summary.results[0]?.detail ?? '', /unexpected flag product_drift/);
+});
+
+test('product resolution grader allows injected runners without OPENAI_API_KEY', async () => {
+  const [fabricCase] = await loadProductResolutionCases([
+    'evals/cases/product-resolution-grader.jsonl'
+  ]);
+  const previousApiKey = process.env.OPENAI_API_KEY;
+
+  delete process.env.OPENAI_API_KEY;
+
+  try {
+    const grade = await gradeProductResolutionCase(fabricCase, {
+      runGrader: async () => ({
+        finalOutput: createExpectedGrade(fabricCase)
+      })
+    });
+
+    assert.equal(grade.pass, true);
+    assert.deepEqual(grade.flags, fabricCase.expected.requiredFlags);
+  } finally {
+    if (typeof previousApiKey === 'string') {
+      process.env.OPENAI_API_KEY = previousApiKey;
+    } else {
+      delete process.env.OPENAI_API_KEY;
+    }
+  }
 });
 
 function createExpectedGrade(
