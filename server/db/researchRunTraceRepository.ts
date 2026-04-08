@@ -5,6 +5,7 @@ import { normalizeSubjectCacheKey } from './researchCacheRepository.js';
 import { queryDatabase } from './client.js';
 
 type ResearchRunTraceRow = {
+  trace_id?: number;
   run_id: string;
   requested_subject_name: string;
   subject_key: string | null;
@@ -87,27 +88,6 @@ export async function storeResearchRunTrace(trace: ResearchRunTracePayload) {
         $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11::jsonb, $12::jsonb,
         $13, $14::jsonb, $15, $16, $17, $18, $19, $20, $21::jsonb
       )
-      on conflict (run_id) do update set
-        requested_subject_name = excluded.requested_subject_name,
-        subject_key = excluded.subject_key,
-        canonical_subject_name = excluded.canonical_subject_name,
-        canonical_vendor_name = excluded.canonical_vendor_name,
-        official_domains = excluded.official_domains,
-        outcome = excluded.outcome,
-        recommendation = excluded.recommendation,
-        eu_status = excluded.eu_status,
-        enterprise_status = excluded.enterprise_status,
-        cache_path = excluded.cache_path,
-        phase_timings = excluded.phase_timings,
-        memo_length = excluded.memo_length,
-        promotion_result = excluded.promotion_result,
-        bundle_id = excluded.bundle_id,
-        baseline_bundle_id = excluded.baseline_bundle_id,
-        error_phase = excluded.error_phase,
-        error_class = excluded.error_class,
-        error_name = excluded.error_name,
-        error_message = excluded.error_message,
-        trace = excluded.trace
     `,
     [
       trace.runId,
@@ -143,6 +123,7 @@ export async function loadResearchRunTrace(runId: string) {
   const result = await queryDatabase<ResearchRunTraceRow>(
     `
       select
+        trace_id,
         run_id,
         requested_subject_name,
         subject_key,
@@ -167,6 +148,7 @@ export async function loadResearchRunTrace(runId: string) {
         created_at
       from research_run_traces
       where run_id = $1
+      order by created_at desc, trace_id desc
       limit 1
     `,
     [runId]
@@ -199,6 +181,7 @@ export async function listResearchRunTraces(options: {
   const result = await queryDatabase<ResearchRunTraceRow>(
     `
       select
+        trace_id,
         run_id,
         requested_subject_name,
         subject_key,
@@ -223,7 +206,7 @@ export async function listResearchRunTraces(options: {
         created_at
       from research_run_traces
       ${whereClause}
-      order by created_at desc
+      order by created_at desc, trace_id desc
       limit ${limitPlaceholder}
     `,
     values

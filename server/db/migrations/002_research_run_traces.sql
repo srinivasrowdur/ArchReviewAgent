@@ -1,5 +1,6 @@
 create table if not exists research_run_traces (
-  run_id text primary key,
+  trace_id bigserial primary key,
+  run_id text not null,
   requested_subject_name text not null,
   subject_key text,
   canonical_subject_name text,
@@ -26,8 +27,11 @@ create table if not exists research_run_traces (
 create index if not exists research_run_traces_created_idx
   on research_run_traces (created_at desc);
 
+create index if not exists research_run_traces_run_id_idx
+  on research_run_traces (run_id, created_at desc, trace_id desc);
+
 create index if not exists research_run_traces_subject_idx
-  on research_run_traces (subject_key, created_at desc);
+  on research_run_traces (subject_key, created_at desc, trace_id desc);
 
 create index if not exists research_run_traces_outcome_idx
-  on research_run_traces (outcome, created_at desc);
+  on research_run_traces (outcome, created_at desc, trace_id desc);
