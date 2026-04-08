@@ -5,6 +5,7 @@ import { ZodError } from 'zod';
 import { evalCaseSchema } from './caseSchema.js';
 import { cacheSourceCaseSchema } from './cacheSourceCaseSchema.js';
 import { publicSurfaceCaseSchema } from './publicSurfaceCaseSchema.js';
+import { productResolutionGraderCaseSchema } from './graders/productResolutionCaseSchema.js';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -71,6 +72,10 @@ function parseKnownEvalCase(parsedJson: unknown) {
     return evalCaseSchema.parse(parsedJson);
   }
 
+  if (hasGrader(parsedJson)) {
+    return productResolutionGraderCaseSchema.parse(parsedJson);
+  }
+
   if (hasCategory(parsedJson)) {
     if (isCacheSourceCategory(parsedJson.category)) {
       return cacheSourceCaseSchema.parse(parsedJson);
@@ -102,6 +107,10 @@ function hasExpectedOutcome(
 
 function hasCategory(value: unknown): value is { category: unknown } {
   return typeof value === 'object' && value !== null && 'category' in value;
+}
+
+function hasGrader(value: unknown): value is { grader: unknown } {
+  return typeof value === 'object' && value !== null && 'grader' in value;
 }
 
 function isCacheSourceCategory(value: unknown) {
