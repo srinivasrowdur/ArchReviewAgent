@@ -2,6 +2,7 @@ import cors from 'cors';
 import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createMockReport } from './mockReport.js';
 import { checkDatabaseHealth } from './db/client.js';
 import { isAllowedCorsOrigin } from './cors.js';
@@ -40,7 +41,7 @@ export function createEnterpriseApp(
     checkDatabaseHealthFn = checkDatabaseHealth,
     createMockReportFn = createMockReport,
     researchCompanyFn = researchCompany,
-    distDir = path.resolve(process.cwd(), 'dist'),
+    distDir = getDefaultDistDir(),
     serveStatic = true
   }: CreateEnterpriseAppOptions = {}
 ) {
@@ -201,6 +202,11 @@ export function createEnterpriseApp(
   }
 
   return app;
+}
+
+export function getDefaultDistDir() {
+  const currentDir = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(currentDir, '../../dist');
 }
 
 function getConfiguredAllowedOrigins(rawAllowedOrigins: string) {
