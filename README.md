@@ -94,8 +94,16 @@ If `DATABASE_URL` is configured, the backend will:
 
 - cache resolved vendor identities
 - cache accepted research reports and their evidence metadata
+- persist per-run trace artifacts for offline shadow grading
 - reuse fresh accepted reports on repeated lookups for more stable results
 - trigger one background refresh on cache hits, then compare the refreshed candidate against the accepted baseline before promotion
+
+To inspect stored research traces locally:
+
+```bash
+npm run traces:inspect -- --limit 5
+npm run traces:inspect -- --run-id <run_id>
+```
 
 In production:
 

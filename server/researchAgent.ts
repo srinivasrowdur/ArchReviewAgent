@@ -34,6 +34,8 @@ import {
   storeResearchArtifacts,
   storeVendorResolution
 } from './db/researchCacheRepository.js';
+import { storeResearchRunTrace } from './db/researchRunTraceRepository.js';
+import { buildResearchRunTracePayload } from './research/traceArtifacts.js';
 type ResearchProgressListener = (update: ResearchProgressUpdate) => void;
 type ResearchWorkflowOptions = {
   onProgress?: ResearchProgressListener;
@@ -106,6 +108,14 @@ async function runResearchWorkflow(
   let baselineSnapshot:
     | Awaited<ReturnType<typeof loadLatestAcceptedReportSnapshot>>
     | undefined;
+  const phaseTimings: Record<string, number> = {};
+  const cachePath: Record<string, unknown> = {
+    resolutionSource,
+    acceptedReportCache: options.skipAcceptedReportCache ? 'skipped' : 'miss',
+    backgroundRefresh: Boolean(options.backgroundRefresh),
+    forceRefresh: Boolean(options.forceRefresh),
+    streamed: Boolean(options.onProgress)
+  };
 
   try {
     companyName = validateVendorInput(rawCompanyName);
@@ -143,6 +153,8 @@ async function runResearchWorkflow(
       resolutionSource,
       elapsedMs: Date.now() - startedAt
     });
+    phaseTimings.resolutionCompletedMs = Date.now() - startedAt;
+    cachePath.resolutionSource = resolutionSource;
 
     const cachedReport = options.skipAcceptedReportCache
       ? null
@@ -162,16 +174,46 @@ async function runResearchWorkflow(
         bundleId: cachedReport.bundleId,
         cachedAt: cachedReport.fetchedAt
       });
+      phaseTimings.cacheHitMs = Date.now() - startedAt;
+      phaseTimings.completedMs = Date.now() - startedAt;
+      cachePath.acceptedReportCache = 'hit';
+      cachePath.bundleId = cachedReport.bundleId;
       maybeStartBackgroundRefresh(runId, companyName, acceptedSubjectKey, resolution, cachedReport);
+      await tryStoreResearchRunTrace(runId, buildResearchRunTracePayload({
+        runId,
+        requestedSubjectName: companyName,
+        subjectKey: acceptedSubjectKey,
+        canonicalSubjectName: cachedReport.report.companyName,
+        canonicalVendorName: resolution.canonicalName,
+        officialDomains: resolution.officialDomains,
+        outcome: 'succeeded',
+        cachePath,
+        phaseTimings,
+        memoLength: cachedReport.memo.length,
+        report: cachedReport.report,
+        promotionResult: {
+          promotedCandidate: false,
+          reason: 'accepted_cache_hit',
+          detail: cachedReport.bundleId
+        },
+        bundleId: cachedReport.bundleId,
+        baselineBundleId: cachedReport.bundleId,
+        backgroundRefresh: options.backgroundRefresh,
+        forceRefresh: options.forceRefresh,
+        streamed: Boolean(options.onProgress)
+      }));
 
       return cachedReport.report;
     }
+
+    cachePath.acceptedReportCache = options.skipAcceptedReportCache ? 'skipped' : 'miss';
 
     baselineSnapshot = await tryLoadLatestAcceptedReportSnapshot(
       runId,
       companyName,
       acceptedSubjectKey
     );
+    cachePath.baselineBundleId = baselineSnapshot?.bundleId ?? null;
 
     phase = 'retrieval';
     memo = await generateResearchMemo(
@@ -191,6 +233,7 @@ async function runResearchWorkflow(
       hasDeploymentSection: /enterprise deployment/i.test(memo),
       elapsedMs: Date.now() - startedAt
     });
+    phaseTimings.memoGeneratedMs = Date.now() - startedAt;
 
     phase = 'decision';
     decision = await buildDecisionFromMemo(
@@ -215,6 +258,7 @@ async function runResearchWorkflow(
       preliminaryVerdictLength: decision.preliminaryVerdict.length,
       elapsedMs: Date.now() - startedAt
     });
+    phaseTimings.decisionBuiltMs = Date.now() - startedAt;
 
     phase = 'presentation';
     const candidateReport = presentDecision(decision);
@@ -230,6 +274,8 @@ async function runResearchWorkflow(
       promotionReason: promotionDecision.reason,
       promotionDetail: promotionDecision.detail
     });
+    cachePath.baselineBundleId = baselineSnapshot?.bundleId ?? null;
+    cachePath.promotedCandidate = promotionDecision.promoteCandidate;
     const storedArtifacts = await tryStoreResearchArtifacts(runId, {
       subjectKey: acceptedSubjectKey,
       requestedSubjectName: companyName,
@@ -257,6 +303,34 @@ async function runResearchWorkflow(
       backgroundRefresh: Boolean(options.backgroundRefresh),
       elapsedMs: Date.now() - startedAt
     });
+    phaseTimings.reportPresentedMs = Date.now() - startedAt;
+    phaseTimings.completedMs = Date.now() - startedAt;
+    cachePath.bundleId = storedArtifacts?.bundleId ?? null;
+    cachePath.retainedBaselineBundleId =
+      promotionDecision.promoteCandidate ? null : baselineSnapshot?.bundleId ?? null;
+    await tryStoreResearchRunTrace(runId, buildResearchRunTracePayload({
+      runId,
+      requestedSubjectName: companyName,
+      subjectKey: acceptedSubjectKey,
+      canonicalSubjectName: report.companyName,
+      canonicalVendorName: resolution.canonicalName,
+      officialDomains: resolution.officialDomains,
+      outcome: 'succeeded',
+      cachePath,
+      phaseTimings,
+      memoLength: memo.length,
+      report,
+      promotionResult: {
+        promotedCandidate: promotionDecision.promoteCandidate,
+        reason: promotionDecision.reason,
+        detail: promotionDecision.detail ?? null
+      },
+      bundleId: storedArtifacts?.bundleId ?? null,
+      baselineBundleId: baselineSnapshot?.bundleId ?? null,
+      backgroundRefresh: options.backgroundRefresh,
+      forceRefresh: options.forceRefresh,
+      streamed: Boolean(options.onProgress)
+    }));
 
     return report;
   } catch (error) {
@@ -277,6 +351,33 @@ async function runResearchWorkflow(
       elapsedMs: Date.now() - startedAt,
       ...describeError(error)
     });
+    phaseTimings.failedMs = Date.now() - startedAt;
+    await tryStoreResearchRunTrace(runId, buildResearchRunTracePayload({
+      runId,
+      requestedSubjectName:
+        phase === 'intake'
+          ? rawCompanyName.trim() || inputSummary.preview
+          : companyName,
+      subjectKey: acceptedSubjectKey || null,
+      canonicalSubjectName: decision?.companyName ?? null,
+      canonicalVendorName: resolution?.canonicalName ?? null,
+      officialDomains: resolution?.officialDomains ?? [],
+      outcome: 'failed',
+      cachePath,
+      phaseTimings,
+      memoLength: memo.length,
+      report: null,
+      promotionResult: null,
+      bundleId: null,
+      baselineBundleId: baselineSnapshot?.bundleId ?? null,
+      error: {
+        phase,
+        ...describeError(error)
+      },
+      backgroundRefresh: options.backgroundRefresh,
+      forceRefresh: options.forceRefresh,
+      streamed: Boolean(options.onProgress)
+    }));
     throw error;
   }
 }
@@ -487,6 +588,21 @@ async function tryReuseBaselineReport(
   }
 
   return baselineSnapshot.report;
+}
+
+async function tryStoreResearchRunTrace(
+  runId: string,
+  trace: ReturnType<typeof buildResearchRunTracePayload>
+) {
+  try {
+    await storeResearchRunTrace(trace);
+  } catch (error) {
+    logResearchEvent('cache_write_failed', {
+      runId,
+      cacheLayer: 'research_run_trace',
+      ...describeError(error)
+    });
+  }
 }
 
 export {
