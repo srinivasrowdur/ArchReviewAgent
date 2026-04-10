@@ -220,11 +220,12 @@ export function createEnterpriseApp(
 
     const sendEvent = (event: string, payload: unknown) => {
       if (closed || res.writableEnded) {
-        return;
+        return false;
       }
 
       res.write(`event: ${event}\n`);
       res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      return true;
     };
 
     sendEvent('ready', { ok: true });
@@ -237,7 +238,7 @@ export function createEnterpriseApp(
         }
       });
 
-      sendEvent('result', {
+      const delivered = sendEvent('result', {
         mode: 'live',
         report
       });
@@ -247,10 +248,12 @@ export function createEnterpriseApp(
           route: '/api/chat/stream',
           transport: 'sse',
           status: 200,
-          result: 'success',
+          reportedStatus: delivered ? null : 499,
+          result: delivered ? 'success' : 'stream_disconnected',
           durationMs: Date.now() - startedAt,
           refresh: researchTarget.refresh,
-          requestedSubjectName: researchTarget.companyName
+          requestedSubjectName: researchTarget.companyName,
+          errorClass: delivered ? null : 'ClientDisconnected'
         })
       );
     } catch (error) {
@@ -261,7 +264,7 @@ export function createEnterpriseApp(
         console.error(error);
       }
 
-      sendEvent('error', {
+      const delivered = sendEvent('error', {
         error: message
       });
       logMetricFn(
@@ -270,13 +273,13 @@ export function createEnterpriseApp(
           route: '/api/chat/stream',
           transport: 'sse',
           status: 200,
-          reportedStatus: status,
-          result: 'stream_error',
+          reportedStatus: delivered ? status : 499,
+          result: delivered ? 'stream_error' : 'stream_disconnected',
           durationMs: Date.now() - startedAt,
           refresh: researchTarget.refresh,
           requestedSubjectName: researchTarget.companyName,
-          timeout: errorDetails.errorClass === 'ResearchTimeoutError',
-          errorClass: errorDetails.errorClass
+          timeout: delivered && errorDetails.errorClass === 'ResearchTimeoutError',
+          errorClass: delivered ? errorDetails.errorClass : 'ClientDisconnected'
         })
       );
     } finally {

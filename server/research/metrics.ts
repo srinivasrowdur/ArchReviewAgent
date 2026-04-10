@@ -85,7 +85,12 @@ export function buildApiRequestMetricPayload(input: {
   transport: 'json' | 'sse';
   method?: string;
   status: number;
-  result: 'success' | 'client_error' | 'server_error' | 'stream_error';
+  result:
+    | 'success'
+    | 'client_error'
+    | 'server_error'
+    | 'stream_error'
+    | 'stream_disconnected';
   durationMs: number;
   refresh: boolean;
   requestedSubjectName?: string;

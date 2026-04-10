@@ -40,6 +40,7 @@ Use this event for:
 Notes:
 
 - streamed failures still return HTTP `200` after the SSE session is established, so streamed failures are surfaced via `result: "stream_error"` plus `reportedStatus`
+- client disconnects before the final SSE payload are surfaced via `result: "stream_disconnected"` with `reportedStatus: 499`
 - JSON requests expose the actual status code directly in `status`
 
 ### `research_run_summary`
