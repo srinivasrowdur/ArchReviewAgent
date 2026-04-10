@@ -8,10 +8,25 @@ export function logResearchEvent(
   event: string,
   fields: Record<string, unknown> = {}
 ) {
+  logStructuredEvent('research', event, fields);
+}
+
+export function logMetricEvent(
+  metric: string,
+  fields: Record<string, unknown> = {}
+) {
+  logStructuredEvent('metric', metric, fields);
+}
+
+function logStructuredEvent(
+  scope: 'research' | 'metric',
+  event: string,
+  fields: Record<string, unknown> = {}
+) {
   console.log(
     JSON.stringify({
       ts: new Date().toISOString(),
-      scope: 'research',
+      scope,
       event,
       ...fields
     })
