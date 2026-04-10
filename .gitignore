@@ -5,3 +5,5 @@ dist/
 dist-server/
 *.log
 .playwright-cli/
+evals/reports/*
+!evals/reports/.gitkeep
