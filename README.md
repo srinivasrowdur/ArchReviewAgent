@@ -83,6 +83,7 @@ The backend serves the built frontend from `dist/` in production mode.
 - future extensibility design for configurable guardrails: [docs/extensible-guardrail-architecture.md](docs/extensible-guardrail-architecture.md)
 - evaluation strategy for releases and production: [docs/evaluation-plan.md](docs/evaluation-plan.md)
 - production metric definitions and local verification flow: [docs/production-metrics.md](docs/production-metrics.md)
+- weekly human calibration workflow and template: [docs/human-calibration-workflow.md](docs/human-calibration-workflow.md), [evals/templates/weekly-calibration-review.md](evals/templates/weekly-calibration-review.md)
 - eval case schema and validator: [evals/caseSchema.ts](evals/caseSchema.ts), [evals/validateCases.ts](evals/validateCases.ts)
 
 ## Database migrations

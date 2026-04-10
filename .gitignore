@@ -7,3 +7,5 @@ dist-server/
 .playwright-cli/
 evals/reports/*
 !evals/reports/.gitkeep
+!evals/reports/examples/
+!evals/reports/examples/**
