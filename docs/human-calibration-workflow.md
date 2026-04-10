@@ -4,9 +4,9 @@ This document defines the weekly human calibration loop for release failures and
 
 It complements:
 
-- [/Users/srinivas/Documents/ArchAgent/docs/evaluation-plan.md](/Users/srinivas/Documents/ArchAgent/docs/evaluation-plan.md)
-- [/Users/srinivas/Documents/ArchAgent/docs/production-metrics.md](/Users/srinivas/Documents/ArchAgent/docs/production-metrics.md)
-- [/Users/srinivas/Documents/ArchAgent/evals/runProductionShadowGrading.ts](/Users/srinivas/Documents/ArchAgent/evals/runProductionShadowGrading.ts)
+- [Evaluation Plan](evaluation-plan.md)
+- [Production Metrics](production-metrics.md)
+- [Production Shadow Grading Runner](../evals/runProductionShadowGrading.ts)
 
 The goal is to keep the evaluation system honest:
 
@@ -195,7 +195,7 @@ Follow-up:
 
 Use the template at:
 
-- [/Users/srinivas/Documents/ArchAgent/evals/templates/weekly-calibration-review.md](/Users/srinivas/Documents/ArchAgent/evals/templates/weekly-calibration-review.md)
+- [Weekly Calibration Review Template](../evals/templates/weekly-calibration-review.md)
 
 Store completed reviews under a dated file name, for example:
 
