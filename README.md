@@ -82,6 +82,7 @@ The backend serves the built frontend from `dist/` in production mode.
 - current production architecture: [architecture.md](architecture.md)
 - future extensibility design for configurable guardrails: [docs/extensible-guardrail-architecture.md](docs/extensible-guardrail-architecture.md)
 - evaluation strategy for releases and production: [docs/evaluation-plan.md](docs/evaluation-plan.md)
+- production metric definitions and local verification flow: [docs/production-metrics.md](docs/production-metrics.md)
 - eval case schema and validator: [evals/caseSchema.ts](evals/caseSchema.ts), [evals/validateCases.ts](evals/validateCases.ts)
 
 ## Database migrations

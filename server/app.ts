@@ -14,6 +14,8 @@ import {
 import { formatResearchError } from './formatResearchError.js';
 import { createSecurityHeadersMiddleware } from './securityHeaders.js';
 import { researchCompany } from './researchAgent.js';
+import { describeError, logMetricEvent } from './research/logging.js';
+import { buildApiRequestMetricPayload } from './research/metrics.js';
 import type {
   ResearchProgressUpdate,
   ResearchRequest,
@@ -27,6 +29,7 @@ type CreateEnterpriseAppOptions = {
   checkDatabaseHealthFn?: typeof checkDatabaseHealth;
   createMockReportFn?: typeof createMockReport;
   researchCompanyFn?: typeof researchCompany;
+  logMetricFn?: typeof logMetricEvent;
   distDir?: string;
   serveStatic?: boolean;
 };
@@ -41,6 +44,7 @@ export function createEnterpriseApp(
     checkDatabaseHealthFn = checkDatabaseHealth,
     createMockReportFn = createMockReport,
     researchCompanyFn = researchCompany,
+    logMetricFn = logMetricEvent,
     distDir = getDefaultDistDir(),
     serveStatic = true
   }: CreateEnterpriseAppOptions = {}
@@ -108,9 +112,26 @@ export function createEnterpriseApp(
   });
 
   app.post('/api/chat', async (req, res) => {
-    const researchTarget = requireResearchTarget(req, res);
+    const researchTarget = getResearchRequestData(req);
+    const startedAt = Date.now();
 
-    if (!researchTarget) {
+    if (researchTarget.companyName.length < 2) {
+      res.status(400).json({
+        error: 'Enter a company or product name to research.'
+      });
+      logMetricFn(
+        'api_request_summary',
+        buildApiRequestMetricPayload({
+          route: '/api/chat',
+          transport: 'json',
+          status: 400,
+          result: 'client_error',
+          durationMs: Date.now() - startedAt,
+          refresh: researchTarget.refresh,
+          requestedSubjectName: researchTarget.companyName,
+          errorClass: 'InvalidVendorInputError'
+        })
+      );
       return;
     }
 
@@ -121,8 +142,21 @@ export function createEnterpriseApp(
       const response: ResearchResponse = { mode: 'live', report };
 
       res.json(response);
+      logMetricFn(
+        'api_request_summary',
+        buildApiRequestMetricPayload({
+          route: '/api/chat',
+          transport: 'json',
+          status: 200,
+          result: 'success',
+          durationMs: Date.now() - startedAt,
+          refresh: researchTarget.refresh,
+          requestedSubjectName: researchTarget.companyName
+        })
+      );
     } catch (error) {
       const { message, status } = formatResearchError(error);
+      const errorDetails = describeError(error);
 
       if (status === 500) {
         console.error(error);
@@ -131,13 +165,44 @@ export function createEnterpriseApp(
       res.status(status).json({
         error: message
       });
+      logMetricFn(
+        'api_request_summary',
+        buildApiRequestMetricPayload({
+          route: '/api/chat',
+          transport: 'json',
+          status,
+          result: status >= 500 ? 'server_error' : 'client_error',
+          durationMs: Date.now() - startedAt,
+          refresh: researchTarget.refresh,
+          requestedSubjectName: researchTarget.companyName,
+          timeout: errorDetails.errorClass === 'ResearchTimeoutError',
+          errorClass: errorDetails.errorClass
+        })
+      );
     }
   });
 
   app.post('/api/chat/stream', async (req, res) => {
-    const researchTarget = requireResearchTarget(req, res);
+    const researchTarget = getResearchRequestData(req);
+    const startedAt = Date.now();
 
-    if (!researchTarget) {
+    if (researchTarget.companyName.length < 2) {
+      res.status(400).json({
+        error: 'Enter a company or product name to research.'
+      });
+      logMetricFn(
+        'api_request_summary',
+        buildApiRequestMetricPayload({
+          route: '/api/chat/stream',
+          transport: 'sse',
+          status: 400,
+          result: 'client_error',
+          durationMs: Date.now() - startedAt,
+          refresh: researchTarget.refresh,
+          requestedSubjectName: researchTarget.companyName,
+          errorClass: 'InvalidVendorInputError'
+        })
+      );
       return;
     }
 
@@ -176,8 +241,21 @@ export function createEnterpriseApp(
         mode: 'live',
         report
       });
+      logMetricFn(
+        'api_request_summary',
+        buildApiRequestMetricPayload({
+          route: '/api/chat/stream',
+          transport: 'sse',
+          status: 200,
+          result: 'success',
+          durationMs: Date.now() - startedAt,
+          refresh: researchTarget.refresh,
+          requestedSubjectName: researchTarget.companyName
+        })
+      );
     } catch (error) {
       const { message, status } = formatResearchError(error);
+      const errorDetails = describeError(error);
 
       if (status === 500) {
         console.error(error);
@@ -186,6 +264,21 @@ export function createEnterpriseApp(
       sendEvent('error', {
         error: message
       });
+      logMetricFn(
+        'api_request_summary',
+        buildApiRequestMetricPayload({
+          route: '/api/chat/stream',
+          transport: 'sse',
+          status: 200,
+          reportedStatus: status,
+          result: 'stream_error',
+          durationMs: Date.now() - startedAt,
+          refresh: researchTarget.refresh,
+          requestedSubjectName: researchTarget.companyName,
+          timeout: errorDetails.errorClass === 'ResearchTimeoutError',
+          errorClass: errorDetails.errorClass
+        })
+      );
     } finally {
       if (!res.writableEnded) {
         res.end();
@@ -225,18 +318,4 @@ function getResearchRequestData(req: express.Request) {
     companyName: typeof companyName === 'string' ? companyName.trim() : '',
     refresh: refresh === true
   };
-}
-
-function requireResearchTarget(req: express.Request, res: express.Response) {
-  const normalizedRequest = getResearchRequestData(req);
-
-  if (normalizedRequest.companyName.length >= 2) {
-    return normalizedRequest;
-  }
-
-  res.status(400).json({
-    error: 'Enter a company or product name to research.'
-  });
-
-  return null;
 }

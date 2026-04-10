@@ -21,6 +21,7 @@ import { evaluateCandidateReport } from './research/cachePolicy.js';
 import {
   createResearchRunId,
   describeError,
+  logMetricEvent,
   logResearchEvent,
   summarizeInputForLog
 } from './research/logging.js';
@@ -36,6 +37,10 @@ import {
 } from './db/researchCacheRepository.js';
 import { storeResearchRunTrace } from './db/researchRunTraceRepository.js';
 import { buildResearchRunTracePayload } from './research/traceArtifacts.js';
+import {
+  buildBackgroundRefreshMetricPayload,
+  buildResearchRunMetricPayload
+} from './research/metrics.js';
 type ResearchProgressListener = (update: ResearchProgressUpdate) => void;
 type ResearchWorkflowOptions = {
   onProgress?: ResearchProgressListener;
@@ -202,6 +207,24 @@ async function runResearchWorkflow(
         forceRefresh: options.forceRefresh,
         streamed: Boolean(options.onProgress)
       }));
+      logMetricEvent(
+        'research_run_summary',
+        buildResearchRunMetricPayload({
+          runId,
+          requestedSubjectName: companyName,
+          subjectKey: acceptedSubjectKey,
+          canonicalSubjectName: cachedReport.report.companyName,
+          canonicalVendorName: resolution.canonicalName,
+          outcome: 'succeeded',
+          report: cachedReport.report,
+          previousRecommendation: cachedReport.report.recommendation,
+          phaseTimings,
+          cachePath,
+          backgroundRefresh: options.backgroundRefresh,
+          forceRefresh: options.forceRefresh,
+          streamed: Boolean(options.onProgress)
+        })
+      );
 
       return cachedReport.report;
     }
@@ -331,6 +354,24 @@ async function runResearchWorkflow(
       forceRefresh: options.forceRefresh,
       streamed: Boolean(options.onProgress)
     }));
+    logMetricEvent(
+      'research_run_summary',
+      buildResearchRunMetricPayload({
+        runId,
+        requestedSubjectName: companyName,
+        subjectKey: acceptedSubjectKey,
+        canonicalSubjectName: report.companyName,
+        canonicalVendorName: resolution.canonicalName,
+        outcome: 'succeeded',
+        report,
+        previousRecommendation: baselineSnapshot?.report.recommendation ?? null,
+        phaseTimings,
+        cachePath,
+        backgroundRefresh: options.backgroundRefresh,
+        forceRefresh: options.forceRefresh,
+        streamed: Boolean(options.onProgress)
+      })
+    );
 
     return report;
   } catch (error) {
@@ -378,6 +419,30 @@ async function runResearchWorkflow(
       forceRefresh: options.forceRefresh,
       streamed: Boolean(options.onProgress)
     }));
+    logMetricEvent(
+      'research_run_summary',
+      buildResearchRunMetricPayload({
+        runId,
+        requestedSubjectName:
+          phase === 'intake'
+            ? rawCompanyName.trim() || inputSummary.preview
+            : companyName,
+        subjectKey: acceptedSubjectKey || null,
+        canonicalSubjectName: decision?.companyName ?? null,
+        canonicalVendorName: resolution?.canonicalName ?? null,
+        outcome: 'failed',
+        previousRecommendation: baselineSnapshot?.report.recommendation ?? null,
+        phaseTimings,
+        cachePath,
+        error: {
+          phase,
+          ...describeError(error)
+        },
+        backgroundRefresh: options.backgroundRefresh,
+        forceRefresh: options.forceRefresh,
+        streamed: Boolean(options.onProgress)
+      })
+    );
     throw error;
   }
 }
@@ -401,6 +466,17 @@ function maybeStartBackgroundRefresh(
       subjectKey,
       reason: 'already_running'
     });
+    logMetricEvent(
+      'background_refresh_event',
+      buildBackgroundRefreshMetricPayload({
+        runId,
+        subjectName: requestedSubjectName,
+        subjectKey,
+        canonicalName: resolution.canonicalName,
+        state: 'skipped',
+        reason: 'already_running'
+      })
+    );
     return;
   }
 
@@ -413,6 +489,18 @@ function maybeStartBackgroundRefresh(
       reason: 'cooldown_active',
       cooldownMs
     });
+    logMetricEvent(
+      'background_refresh_event',
+      buildBackgroundRefreshMetricPayload({
+        runId,
+        subjectName: requestedSubjectName,
+        subjectKey,
+        canonicalName: resolution.canonicalName,
+        state: 'skipped',
+        reason: 'cooldown_active',
+        cooldownMs
+      })
+    );
     return;
   }
 
@@ -427,6 +515,16 @@ function maybeStartBackgroundRefresh(
     bundleId: cachedReport?.bundleId,
     cachedAt: cachedReport?.fetchedAt
   });
+  logMetricEvent(
+    'background_refresh_event',
+    buildBackgroundRefreshMetricPayload({
+      runId,
+      subjectName: requestedSubjectName,
+      subjectKey,
+      canonicalName: resolution.canonicalName,
+      state: 'scheduled'
+    })
+  );
 
   setTimeout(() => {
     void runResearchWorkflow(requestedSubjectName, {
@@ -442,15 +540,37 @@ function maybeStartBackgroundRefresh(
           subjectKey,
           recommendation: report.recommendation
         });
+        logMetricEvent(
+          'background_refresh_event',
+          buildBackgroundRefreshMetricPayload({
+            runId,
+            subjectName: requestedSubjectName,
+            subjectKey,
+            canonicalName: report.companyName,
+            state: 'completed'
+          })
+        );
       })
       .catch((error) => {
+        const errorDetails = describeError(error);
         logResearchEvent('background_refresh_failed', {
           runId,
           subjectName: requestedSubjectName,
           canonicalName: resolution.canonicalName,
           subjectKey,
-          ...describeError(error)
+          ...errorDetails
         });
+        logMetricEvent(
+          'background_refresh_event',
+          buildBackgroundRefreshMetricPayload({
+            runId,
+            subjectName: requestedSubjectName,
+            subjectKey,
+            canonicalName: resolution.canonicalName,
+            state: 'failed',
+            errorClass: errorDetails.errorClass
+          })
+        );
       })
       .finally(() => {
         activeBackgroundRefreshes.delete(subjectKey);
