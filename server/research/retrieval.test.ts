@@ -15,6 +15,7 @@ const resolution: VendorResolution = {
 
 test('generateResearchMemo assembles streamed text and emits ordered progress stages', async () => {
   const seenStages: string[] = [];
+  const diagnostics: string[] = [];
 
   const memo = await generateResearchMemo(
     'Grammarly',
@@ -22,14 +23,19 @@ test('generateResearchMemo assembles streamed text and emits ordered progress st
     Date.now(),
     30_000,
     (update) => seenStages.push(update.stage),
-    async () =>
-      createStreamResult([
+    async (_, __, options) => {
+      assert.equal(options.maxTurns, 4);
+      return createStreamResult([
         runItemEvent('tool_called'),
         textDeltaEvent('Vendor: Grammarly. EU data residency: Enterprise customers can select EU. '),
         textDeltaEvent(
           'Enterprise deployment: Supports SAML SSO and SCIM. Preliminary verdict: Yellow.'
         )
-      ])
+      ]);
+    },
+    {
+      onDiagnostic: (event) => diagnostics.push(event.event)
+    }
   );
 
   assert.match(memo, /Enterprise deployment: Supports SAML SSO and SCIM\./);
@@ -41,6 +47,32 @@ test('generateResearchMemo assembles streamed text and emits ordered progress st
     'synthesizing',
     'finalizing'
   ]);
+  assert.deepEqual(diagnostics, [
+    'attempt_started',
+    'first_stream_event',
+    'tool_called',
+    'first_text_delta',
+    'stream_completed'
+  ]);
+});
+
+test('generateResearchMemo uses a lower turn limit for background refresh', async () => {
+  await generateResearchMemo(
+    'Grammarly',
+    resolution,
+    Date.now(),
+    30_000,
+    undefined,
+    async (_, __, options) => {
+      assert.equal(options.maxTurns, 3);
+      return createStreamResult([
+        textDeltaEvent('Vendor: Grammarly. EU data residency: Enterprise customers can select EU. ')
+      ]);
+    },
+    {
+      backgroundRefresh: true
+    }
+  );
 });
 
 test('generateResearchMemo salvages partial memo on retryable stream error', async () => {
