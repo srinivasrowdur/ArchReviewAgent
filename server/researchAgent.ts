@@ -41,6 +41,13 @@ import {
   buildBackgroundRefreshMetricPayload,
   buildResearchRunMetricPayload
 } from './research/metrics.js';
+import {
+  createBackgroundRefreshPolicyState,
+  getBackgroundRefreshDecision,
+  markBackgroundRefreshCompleted,
+  markBackgroundRefreshFailed,
+  markBackgroundRefreshScheduled
+} from './research/backgroundRefreshPolicy.js';
 type ResearchProgressListener = (update: ResearchProgressUpdate) => void;
 type ResearchWorkflowOptions = {
   onProgress?: ResearchProgressListener;
@@ -50,8 +57,7 @@ type ResearchWorkflowOptions = {
   seededResolution?: Awaited<ReturnType<typeof resolveVendorIdentity>>;
 };
 
-const activeBackgroundRefreshes = new Set<string>();
-const lastBackgroundRefreshAt = new Map<string, number>();
+const backgroundRefreshPolicyState = createBackgroundRefreshPolicyState();
 
 function getResearchTimeoutMs() {
   const parsed = Number(process.env.RESEARCH_TIMEOUT_MS ?? 180_000);
@@ -68,6 +74,16 @@ function getBackgroundRefreshCooldownMs() {
 
   if (!Number.isFinite(parsed) || parsed < 0) {
     return 600_000;
+  }
+
+  return parsed;
+}
+
+function getBackgroundRefreshTimeoutCooldownMs() {
+  const parsed = Number(process.env.BACKGROUND_REFRESH_TIMEOUT_COOLDOWN_MS ?? 3_600_000);
+
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 3_600_000;
   }
 
   return parsed;
@@ -244,7 +260,23 @@ async function runResearchWorkflow(
       resolution,
       startedAt,
       budgetMs,
-      options.onProgress
+      options.onProgress,
+      undefined,
+      {
+        backgroundRefresh: options.backgroundRefresh,
+        onDiagnostic: (event) => {
+          logResearchEvent('retrieval_diagnostic', {
+            runId,
+            subjectName: companyName,
+            canonicalName: resolution?.canonicalName ?? null,
+            backgroundRefresh: Boolean(options.backgroundRefresh),
+            diagnosticEvent: event.event,
+            attempt: event.attempt,
+            elapsedMs: event.elapsedMs,
+            detail: event.detail ?? null
+          });
+        }
+      }
     );
     logResearchEvent('memo_generated', {
       subjectName: companyName,
@@ -455,16 +487,23 @@ function maybeStartBackgroundRefresh(
   cachedReport: Awaited<ReturnType<typeof loadAcceptedReportSnapshot>>
 ) {
   const cooldownMs = getBackgroundRefreshCooldownMs();
+  const timeoutCooldownMs = getBackgroundRefreshTimeoutCooldownMs();
   const now = Date.now();
-  const lastStartedAt = lastBackgroundRefreshAt.get(subjectKey) ?? 0;
+  const decision = getBackgroundRefreshDecision({
+    state: backgroundRefreshPolicyState,
+    subjectKey,
+    now,
+    cooldownMs
+  });
 
-  if (activeBackgroundRefreshes.has(subjectKey)) {
+  if (decision.skip) {
     logResearchEvent('background_refresh_skipped', {
       runId,
       subjectName: requestedSubjectName,
       canonicalName: resolution.canonicalName,
       subjectKey,
-      reason: 'already_running'
+      reason: decision.reason,
+      cooldownMs: decision.cooldownMs
     });
     logMetricEvent(
       'background_refresh_event',
@@ -474,38 +513,14 @@ function maybeStartBackgroundRefresh(
         subjectKey,
         canonicalName: resolution.canonicalName,
         state: 'skipped',
-        reason: 'already_running'
+        reason: decision.reason,
+        cooldownMs: decision.cooldownMs
       })
     );
     return;
   }
 
-  if (now - lastStartedAt < cooldownMs) {
-    logResearchEvent('background_refresh_skipped', {
-      runId,
-      subjectName: requestedSubjectName,
-      canonicalName: resolution.canonicalName,
-      subjectKey,
-      reason: 'cooldown_active',
-      cooldownMs
-    });
-    logMetricEvent(
-      'background_refresh_event',
-      buildBackgroundRefreshMetricPayload({
-        runId,
-        subjectName: requestedSubjectName,
-        subjectKey,
-        canonicalName: resolution.canonicalName,
-        state: 'skipped',
-        reason: 'cooldown_active',
-        cooldownMs
-      })
-    );
-    return;
-  }
-
-  activeBackgroundRefreshes.add(subjectKey);
-  lastBackgroundRefreshAt.set(subjectKey, now);
+  markBackgroundRefreshScheduled(backgroundRefreshPolicyState, subjectKey, now);
 
   logResearchEvent('background_refresh_scheduled', {
     runId,
@@ -533,6 +548,7 @@ function maybeStartBackgroundRefresh(
       seededResolution: resolution
     })
       .then((report) => {
+        markBackgroundRefreshCompleted(backgroundRefreshPolicyState, subjectKey);
         logResearchEvent('background_refresh_completed', {
           runId,
           subjectName: requestedSubjectName,
@@ -553,6 +569,12 @@ function maybeStartBackgroundRefresh(
       })
       .catch((error) => {
         const errorDetails = describeError(error);
+        markBackgroundRefreshFailed(backgroundRefreshPolicyState, {
+          subjectKey,
+          now: Date.now(),
+          errorClass: errorDetails.errorClass,
+          timeoutCooldownMs
+        });
         logResearchEvent('background_refresh_failed', {
           runId,
           subjectName: requestedSubjectName,
@@ -573,7 +595,9 @@ function maybeStartBackgroundRefresh(
         );
       })
       .finally(() => {
-        activeBackgroundRefreshes.delete(subjectKey);
+        if (!backgroundRefreshPolicyState.blockedUntil.has(subjectKey)) {
+          markBackgroundRefreshCompleted(backgroundRefreshPolicyState, subjectKey);
+        }
       });
   }, 0);
 }

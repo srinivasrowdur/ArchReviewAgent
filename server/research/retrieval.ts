@@ -15,6 +15,23 @@ import {
 } from './errors.js';
 
 type ResearchProgressListener = (update: ResearchProgressUpdate) => void;
+export type RetrievalDiagnosticEvent =
+  | {
+      event:
+        | 'attempt_started'
+        | 'first_stream_event'
+        | 'first_text_delta'
+        | 'tool_called'
+        | 'tool_output'
+        | 'stream_completed'
+        | 'retrying_after_error'
+        | 'attempt_failed'
+        | 'attempt_timed_out';
+      attempt: number;
+      elapsedMs: number;
+      detail?: string | null;
+    };
+type RetrievalDiagnosticListener = (event: RetrievalDiagnosticEvent) => void;
 
 type StreamRunResult = AsyncIterable<RunStreamEvent> & {
   completed: Promise<void>;
@@ -33,7 +50,7 @@ type ResearchRunFn = (
 
 const sharedModelSettings = {
   toolChoice: 'auto' as const,
-  maxTokens: 900,
+  maxTokens: 700,
   reasoning: {
     effort: 'low' as const,
     summary: 'auto' as const
@@ -47,10 +64,15 @@ export async function generateResearchMemo(
   startedAt: number,
   budgetMs: number,
   onProgress?: ResearchProgressListener,
-  runResearch: ResearchRunFn = run
+  runResearch: ResearchRunFn = run,
+  options: {
+    backgroundRefresh?: boolean;
+    onDiagnostic?: RetrievalDiagnosticListener;
+  } = {}
 ) {
   const progress = createProgressEmitter(onProgress);
   const maxAttempts = 2;
+  const onDiagnostic = options.onDiagnostic;
 
   progress.advance('starting');
 
@@ -64,16 +86,58 @@ export async function generateResearchMemo(
 
     try {
       const signal = AbortSignal.timeout(remainingMs);
+      const attemptNumber = attempt + 1;
+      onDiagnostic?.({
+        event: 'attempt_started',
+        attempt: attemptNumber,
+        elapsedMs: Date.now() - startedAt,
+        detail: `remainingMs=${remainingMs}`
+      });
       const researchMemoAgent = createResearchMemoAgent(subjectName, resolution);
       const stream = await runResearch(researchMemoAgent, buildPrompt(subjectName, resolution), {
-        maxTurns: 6,
+        maxTurns: options.backgroundRefresh ? 3 : 4,
         signal,
         stream: true
       });
+      let sawFirstStreamEvent = false;
+      let sawFirstTextDelta = false;
 
       progress.advance('searching');
 
       for await (const event of stream) {
+        if (!sawFirstStreamEvent) {
+          sawFirstStreamEvent = true;
+          onDiagnostic?.({
+            event: 'first_stream_event',
+            attempt: attemptNumber,
+            elapsedMs: Date.now() - startedAt,
+            detail: event.type
+          });
+        }
+
+        if (event.type === 'run_item_stream_event') {
+          if (event.name === 'tool_called' || event.name === 'tool_output') {
+            onDiagnostic?.({
+              event: event.name,
+              attempt: attemptNumber,
+              elapsedMs: Date.now() - startedAt
+            });
+          }
+        }
+
+        if (
+          !sawFirstTextDelta &&
+          event.type === 'raw_model_stream_event' &&
+          event.data.type === 'output_text_delta'
+        ) {
+          sawFirstTextDelta = true;
+          onDiagnostic?.({
+            event: 'first_text_delta',
+            attempt: attemptNumber,
+            elapsedMs: Date.now() - startedAt
+          });
+        }
+
         streamedMemoText = updateProgressFromStreamEvent(event, streamedMemoText, (stage) =>
           progress.advance(stage)
         );
@@ -82,9 +146,20 @@ export async function generateResearchMemo(
       await stream.completed;
 
       const finalMemo = streamedMemoText.trim();
+      onDiagnostic?.({
+        event: 'stream_completed',
+        attempt: attemptNumber,
+        elapsedMs: Date.now() - startedAt,
+        detail: `memoLength=${finalMemo.length}`
+      });
 
       if (stream.error) {
         if (isAbortError(stream.error)) {
+          onDiagnostic?.({
+            event: 'attempt_timed_out',
+            attempt: attemptNumber,
+            elapsedMs: Date.now() - startedAt
+          });
           throw new ResearchTimeoutError();
         }
 
@@ -96,6 +171,12 @@ export async function generateResearchMemo(
           }
 
           if (attempt < maxAttempts - 1) {
+            onDiagnostic?.({
+              event: 'retrying_after_error',
+              attempt: attemptNumber,
+              elapsedMs: Date.now() - startedAt,
+              detail: errorDetail(stream.error)
+            });
             continue;
           }
 
@@ -119,6 +200,11 @@ export async function generateResearchMemo(
       return finalMemo;
     } catch (error) {
       if (isAbortError(error)) {
+        onDiagnostic?.({
+          event: 'attempt_timed_out',
+          attempt: attempt + 1,
+          elapsedMs: Date.now() - startedAt
+        });
         throw new ResearchTimeoutError();
       }
 
@@ -136,13 +222,31 @@ export async function generateResearchMemo(
       }
 
       if (isRetryableModelError(error) && attempt < maxAttempts - 1) {
+        onDiagnostic?.({
+          event: 'retrying_after_error',
+          attempt: attempt + 1,
+          elapsedMs: Date.now() - startedAt,
+          detail: errorDetail(error)
+        });
         continue;
       }
 
       if (isRetryableModelError(error)) {
+        onDiagnostic?.({
+          event: 'attempt_failed',
+          attempt: attempt + 1,
+          elapsedMs: Date.now() - startedAt,
+          detail: errorDetail(error)
+        });
         throw new ResearchGenerationError();
       }
 
+      onDiagnostic?.({
+        event: 'attempt_failed',
+        attempt: attempt + 1,
+        elapsedMs: Date.now() - startedAt,
+        detail: errorDetail(error)
+      });
       throw error;
     }
   }
@@ -192,7 +296,7 @@ Preliminary verdict
     modelSettings: sharedModelSettings,
     tools: [
       webSearchTool({
-        searchContextSize: 'medium',
+        searchContextSize: 'low',
         filters: {
           allowedDomains: resolution.officialDomains
         }
@@ -299,4 +403,12 @@ function isRetryableModelError(error: unknown) {
     (error instanceof Error &&
       /did not produce a final response|invalid output type/i.test(error.message))
   );
+}
+
+function errorDetail(error: unknown) {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`;
+  }
+
+  return String(error);
 }
