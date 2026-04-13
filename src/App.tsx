@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState, useTransition, type ReactNode } from 're
 import type {
   EnterpriseReadinessReport,
   GuardrailAssessment,
+  ResearchActivityUpdate,
   ResearchProgressStage,
   ResearchResponse
 } from '../shared/contracts';
@@ -73,6 +74,7 @@ export default function App() {
     useState<ResearchProgressStage | null>(null);
   const [visibleResearchStage, setVisibleResearchStage] =
     useState<ResearchProgressStage | null>(null);
+  const [researchActivities, setResearchActivities] = useState<ResearchActivityUpdate[]>([]);
   const [pendingAssistantMessage, setPendingAssistantMessage] =
     useState<PendingAssistantMessage | null>(null);
   const [, startTransition] = useTransition();
@@ -139,6 +141,7 @@ export default function App() {
     setIsLoading(false);
     setReportedResearchStage(null);
     setVisibleResearchStage(null);
+    setResearchActivities([]);
   }
 
   function handleCreateConversation() {
@@ -204,6 +207,9 @@ export default function App() {
       const payload = isTestMode
         ? await requestResearch('/api/chat/test', nextCompany)
         : await requestStreamedResearch(nextCompany, {
+            onActivity: (update) => {
+              setResearchActivities((current) => appendResearchActivity(current, update));
+            },
             refresh: options.forceRefresh,
             onProgress: (update) => {
               streamedProgressStages.push(update.stage);
@@ -371,6 +377,7 @@ export default function App() {
             {isLoading ? (
               <LoadingMessage
                 activeStage={visibleResearchStage}
+                activities={researchActivities}
                 isTestMode={isTestMode}
               />
             ) : null}
@@ -447,6 +454,7 @@ async function requestResearch(
 async function requestStreamedResearch(
   companyName: string,
   options: {
+    onActivity: (update: ResearchActivityUpdate) => void;
     refresh?: boolean;
     onProgress: (update: ResearchProgressUpdate) => void;
   }
@@ -496,6 +504,10 @@ async function requestStreamedResearch(
           options.onProgress(parsedEvent.data as ResearchProgressUpdate);
         }
 
+        if (parsedEvent.event === 'activity') {
+          options.onActivity(parsedEvent.data as ResearchActivityUpdate);
+        }
+
         if (parsedEvent.event === 'result') {
           finalPayload = parsedEvent.data as ResearchResponse;
         }
@@ -540,16 +552,36 @@ function parseStreamEvent(rawEvent: string) {
   };
 }
 
+function appendResearchActivity(
+  current: ResearchActivityUpdate[],
+  next: ResearchActivityUpdate
+) {
+  if (!next.label) {
+    return current;
+  }
+
+  const lastActivity = current[current.length - 1];
+
+  if (lastActivity && lastActivity.label === next.label) {
+    return current;
+  }
+
+  return [...current, next].slice(-5);
+}
+
 function LoadingMessage({
   activeStage,
+  activities,
   isTestMode
 }: {
   activeStage: ResearchProgressStage | null;
+  activities: ResearchActivityUpdate[];
   isTestMode: boolean;
 }) {
   const currentStage =
     liveResearchStages.find((stage) => stage.stage === activeStage) ??
     liveResearchStages[0];
+  const latestActivity = activities[activities.length - 1];
   const activeIndex = isTestMode
     ? -1
     : liveResearchStages.findIndex((stage) => stage.stage === currentStage.stage);
@@ -558,7 +590,9 @@ function LoadingMessage({
     <div className="message assistant progress-message">
       <div className="message-meta">agent</div>
       <p className="message-copy">
-        {isTestMode ? 'Loading mocked security review.' : currentStage.label}
+        {isTestMode
+          ? 'Loading mocked security review.'
+          : latestActivity?.label ?? currentStage.label}
       </p>
 
       <div className="typing-indicator" aria-label="Research in progress">
@@ -568,23 +602,38 @@ function LoadingMessage({
       </div>
 
       {!isTestMode ? (
-        <ol className="progress-list">
-          {liveResearchStages.map((stage, index) => {
-            const state =
-              index < activeIndex
-                ? 'done'
-                : index === activeIndex
-                  ? 'active'
-                  : 'pending';
+        <>
+          <ol className="progress-list">
+            {liveResearchStages.map((stage, index) => {
+              const state =
+                index < activeIndex
+                  ? 'done'
+                  : index === activeIndex
+                    ? 'active'
+                    : 'pending';
 
-            return (
-              <li className={`progress-step ${state}`} key={stage.stage}>
-                <span className="progress-marker" aria-hidden="true" />
-                <span>{stage.label}</span>
-              </li>
-            );
-          })}
-        </ol>
+              return (
+                <li className={`progress-step ${state}`} key={stage.stage}>
+                  <span className="progress-marker" aria-hidden="true" />
+                  <span>{stage.label}</span>
+                </li>
+              );
+            })}
+          </ol>
+
+          {activities.length > 0 ? (
+            <div className="progress-activity">
+              <p className="progress-activity-label">Live activity</p>
+              <ol className="progress-activity-list">
+                {activities.map((activity, index) => (
+                  <li className="progress-activity-item" key={`${activity.kind}-${index}`}>
+                    {activity.label}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
+        </>
       ) : null}
     </div>
   );
