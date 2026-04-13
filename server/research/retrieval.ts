@@ -599,8 +599,8 @@ function extractSearchQuery(rawArguments: string | undefined) {
   }
 }
 
-function extractFirstUrl(rawText: string | undefined) {
-  if (!rawText) {
+function extractFirstUrl(rawText: unknown) {
+  if (typeof rawText !== 'string' || !rawText) {
     return null;
   }
 

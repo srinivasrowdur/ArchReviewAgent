@@ -161,6 +161,38 @@ test('generateResearchMemo emits retry activity when a search pass fails before 
   assert.ok(seenActivities.includes('Running search pass 2 across official vendor docs'));
 });
 
+test('generateResearchMemo ignores non-string tool outputs when building source-review activity', async () => {
+  const seenActivities: string[] = [];
+
+  const memo = await generateResearchMemo(
+    'Grammarly',
+    resolution,
+    Date.now(),
+    30_000,
+    undefined,
+    async () =>
+      createStreamResult([
+        runItemEvent('tool_output', {
+          type: 'hosted_tool_call',
+          name: 'web_search',
+          output: {
+            type: 'text',
+            text: 'Top result payload'
+          }
+        }),
+        textDeltaEvent(
+          'Vendor: Grammarly. EU data residency: Enterprise customers can select EU. Enterprise deployment: Supports SAML SSO. Preliminary verdict: Yellow.'
+        )
+      ]),
+    {
+      onActivity: (update) => seenActivities.push(update.label)
+    }
+  );
+
+  assert.match(memo, /Vendor: Grammarly\./);
+  assert.ok(seenActivities.includes('Reviewing retrieved vendor evidence'));
+});
+
 test('generateResearchMemo maps abort-like failures to ResearchTimeoutError', async () => {
   await assert.rejects(
     () =>
