@@ -15,6 +15,7 @@ const resolution: VendorResolution = {
 
 test('generateResearchMemo assembles streamed text and emits ordered progress stages', async () => {
   const seenStages: string[] = [];
+  const seenActivities: string[] = [];
   const diagnostics: string[] = [];
 
   const memo = await generateResearchMemo(
@@ -26,7 +27,16 @@ test('generateResearchMemo assembles streamed text and emits ordered progress st
     async (_, __, options) => {
       assert.equal(options.maxTurns, 4);
       return createStreamResult([
-        runItemEvent('tool_called'),
+        runItemEvent('tool_called', {
+          type: 'hosted_tool_call',
+          name: 'web_search',
+          arguments: JSON.stringify({ query: 'Grammarly EU residency' })
+        }),
+        runItemEvent('tool_output', {
+          type: 'hosted_tool_call',
+          name: 'web_search',
+          output: 'Top result: https://support.grammarly.com/hc/en-us/articles/example'
+        }),
         textDeltaEvent('Vendor: Grammarly. EU data residency: Enterprise customers can select EU. '),
         textDeltaEvent(
           'Enterprise deployment: Supports SAML SSO and SCIM. Preliminary verdict: Yellow.'
@@ -34,6 +44,7 @@ test('generateResearchMemo assembles streamed text and emits ordered progress st
       ]);
     },
     {
+      onActivity: (update) => seenActivities.push(update.label),
       onDiagnostic: (event) => diagnostics.push(event.event)
     }
   );
@@ -47,10 +58,21 @@ test('generateResearchMemo assembles streamed text and emits ordered progress st
     'synthesizing',
     'finalizing'
   ]);
+  assert.deepEqual(seenActivities, [
+    'Running search pass 1 across official vendor docs',
+    'Searching official documentation on grammarly.com, support.grammarly.com',
+    'Waiting for source matches from grammarly.com, support.grammarly.com',
+    'Searching vendor documentation for “Grammarly EU residency”',
+    'Reviewing retrieved source from support.grammarly.com',
+    'Checking retrieved evidence for EU residency signals',
+    'Checking retrieved evidence for enterprise deployment controls',
+    'Synthesizing the analyst verdict from the gathered evidence'
+  ]);
   assert.deepEqual(diagnostics, [
     'attempt_started',
     'first_stream_event',
     'tool_called',
+    'tool_output',
     'first_text_delta',
     'stream_completed'
   ]);
@@ -96,6 +118,49 @@ test('generateResearchMemo salvages partial memo on retryable stream error', asy
   assert.match(memo, /EU data residency: No evidence of EU-only residency\./);
 });
 
+test('generateResearchMemo emits retry activity when a search pass fails before usable output', async () => {
+  const seenActivities: string[] = [];
+  let calls = 0;
+
+  const memo = await generateResearchMemo(
+    'Palantir',
+    {
+      canonicalName: 'Palantir',
+      officialDomains: ['palantir.com', 'palantirfoundry.com'],
+      confidence: 'high',
+      alternatives: [],
+      rationale: 'Resolved to the analytics vendor.'
+    },
+    Date.now(),
+    30_000,
+    undefined,
+    async () => {
+      calls += 1;
+
+      if (calls === 1) {
+        return createStreamResult([], new Error('Model did not produce a final response!'));
+      }
+
+      return createStreamResult([
+        textDeltaEvent(
+          'Vendor: Palantir. EU data residency: No explicit EU region commitment found. Enterprise deployment: Supports enterprise deployment controls. Preliminary verdict: Red.'
+        )
+      ]);
+    },
+    {
+      onActivity: (update) => seenActivities.push(update.label)
+    }
+  );
+
+  assert.match(memo, /Vendor: Palantir\./);
+  assert.ok(
+    seenActivities.includes(
+      'Retrying the vendor search because the previous pass did not return a usable answer'
+    )
+  );
+  assert.ok(seenActivities.includes('Running search pass 2 across official vendor docs'));
+});
+
 test('generateResearchMemo maps abort-like failures to ResearchTimeoutError', async () => {
   await assert.rejects(
     () =>
@@ -127,10 +192,16 @@ function createStreamResult(events: RunStreamEvent[], error?: unknown) {
   };
 }
 
-function runItemEvent(name: 'tool_called' | 'tool_output') {
+function runItemEvent(
+  name: 'tool_called' | 'tool_output',
+  rawItem?: Record<string, unknown>
+) {
   return {
     type: 'run_item_stream_event',
-    name
+    name,
+    item: {
+      rawItem
+    }
   } as RunStreamEvent;
 }
 

@@ -17,6 +17,7 @@ import { researchCompany } from './researchAgent.js';
 import { describeError, logMetricEvent } from './research/logging.js';
 import { buildApiRequestMetricPayload } from './research/metrics.js';
 import type {
+  ResearchActivityUpdate,
   ResearchProgressUpdate,
   ResearchRequest,
   ResearchResponse
@@ -233,6 +234,9 @@ export function createEnterpriseApp(
     try {
       const report = await researchCompanyFn(researchTarget.companyName, {
         forceRefresh: researchTarget.refresh,
+        onActivity: (update: ResearchActivityUpdate) => {
+          sendEvent('activity', update);
+        },
         onProgress: (update: ResearchProgressUpdate) => {
           sendEvent('progress', update);
         }

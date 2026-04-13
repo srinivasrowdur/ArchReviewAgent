@@ -9,6 +9,12 @@ export type ResearchProgressStage =
   | 'reviewing_deployment'
   | 'synthesizing'
   | 'finalizing';
+export type ResearchActivityKind =
+  | 'resolution'
+  | 'search'
+  | 'source_review'
+  | 'evidence'
+  | 'synthesis';
 
 export interface EvidenceItem {
   title: string;
@@ -53,6 +59,11 @@ export interface ResearchResponse {
 
 export interface ResearchProgressUpdate {
   stage: ResearchProgressStage;
+  label: string;
+}
+
+export interface ResearchActivityUpdate {
+  kind: ResearchActivityKind;
   label: string;
 }
 

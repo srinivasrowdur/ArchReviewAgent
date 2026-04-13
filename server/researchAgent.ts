@@ -13,6 +13,7 @@ import {
 } from './research/errors.js';
 import { generateResearchMemo } from './research/retrieval.js';
 import {
+  type ResearchActivityUpdate,
   liveResearchStages,
   type ResearchProgressUpdate
 } from '../shared/contracts.js';
@@ -49,8 +50,10 @@ import {
   markBackgroundRefreshScheduled
 } from './research/backgroundRefreshPolicy.js';
 type ResearchProgressListener = (update: ResearchProgressUpdate) => void;
+type ResearchActivityListener = (update: ResearchActivityUpdate) => void;
 type ResearchWorkflowOptions = {
   onProgress?: ResearchProgressListener;
+  onActivity?: ResearchActivityListener;
   forceRefresh?: boolean;
   skipAcceptedReportCache?: boolean;
   backgroundRefresh?: boolean;
@@ -94,10 +97,12 @@ export async function researchCompany(
   options: {
     forceRefresh?: boolean;
     onProgress?: ResearchProgressListener;
+    onActivity?: ResearchActivityListener;
   } = {}
 ) {
   return runResearchWorkflow(companyName, {
     forceRefresh: options.forceRefresh,
+    onActivity: options.onActivity,
     onProgress: options.onProgress,
     skipAcceptedReportCache: options.forceRefresh
   });
@@ -176,6 +181,13 @@ async function runResearchWorkflow(
     });
     phaseTimings.resolutionCompletedMs = Date.now() - startedAt;
     cachePath.resolutionSource = resolutionSource;
+    options.onActivity?.({
+      kind: 'resolution',
+      label:
+        companyName === resolution.canonicalName
+          ? `Resolved review subject as ${resolution.canonicalName}`
+          : `Resolved ${companyName} under ${resolution.canonicalName}`
+    });
 
     const cachedReport = options.skipAcceptedReportCache
       ? null
@@ -263,6 +275,7 @@ async function runResearchWorkflow(
       options.onProgress,
       undefined,
       {
+        onActivity: options.onActivity,
         backgroundRefresh: options.backgroundRefresh,
         onDiagnostic: (event) => {
           logResearchEvent('retrieval_diagnostic', {

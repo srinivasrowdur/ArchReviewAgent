@@ -5,7 +5,11 @@ import {
   type RunStreamEvent,
   webSearchTool
 } from '@openai/agents';
-import type { ResearchProgressStage, ResearchProgressUpdate } from '../../shared/contracts.js';
+import type {
+  ResearchActivityUpdate,
+  ResearchProgressStage,
+  ResearchProgressUpdate
+} from '../../shared/contracts.js';
 import { liveResearchStages } from '../../shared/contracts.js';
 import type { VendorResolution } from './vendorIntake.js';
 import {
@@ -15,6 +19,7 @@ import {
 } from './errors.js';
 
 type ResearchProgressListener = (update: ResearchProgressUpdate) => void;
+type ResearchActivityListener = (update: ResearchActivityUpdate) => void;
 export type RetrievalDiagnosticEvent =
   | {
       event:
@@ -66,6 +71,7 @@ export async function generateResearchMemo(
   onProgress?: ResearchProgressListener,
   runResearch: ResearchRunFn = run,
   options: {
+    onActivity?: ResearchActivityListener;
     backgroundRefresh?: boolean;
     onDiagnostic?: RetrievalDiagnosticListener;
   } = {}
@@ -73,6 +79,16 @@ export async function generateResearchMemo(
   const progress = createProgressEmitter(onProgress);
   const maxAttempts = 2;
   const onDiagnostic = options.onDiagnostic;
+  const activity = createActivityEmitter(options.onActivity);
+  const publishDiagnostic = (event: RetrievalDiagnosticEvent) => {
+    onDiagnostic?.(event);
+
+    const diagnosticActivity = toActivityFromDiagnosticEvent(event, resolution.officialDomains);
+
+    if (diagnosticActivity) {
+      activity.emit(diagnosticActivity);
+    }
+  };
 
   progress.advance('starting');
 
@@ -87,7 +103,7 @@ export async function generateResearchMemo(
     try {
       const signal = AbortSignal.timeout(remainingMs);
       const attemptNumber = attempt + 1;
-      onDiagnostic?.({
+      publishDiagnostic({
         event: 'attempt_started',
         attempt: attemptNumber,
         elapsedMs: Date.now() - startedAt,
@@ -103,11 +119,15 @@ export async function generateResearchMemo(
       let sawFirstTextDelta = false;
 
       progress.advance('searching');
+      activity.emit({
+        kind: 'search',
+        label: buildDomainSearchLabel(resolution.officialDomains)
+      });
 
       for await (const event of stream) {
         if (!sawFirstStreamEvent) {
           sawFirstStreamEvent = true;
-          onDiagnostic?.({
+          publishDiagnostic({
             event: 'first_stream_event',
             attempt: attemptNumber,
             elapsedMs: Date.now() - startedAt,
@@ -117,7 +137,7 @@ export async function generateResearchMemo(
 
         if (event.type === 'run_item_stream_event') {
           if (event.name === 'tool_called' || event.name === 'tool_output') {
-            onDiagnostic?.({
+            publishDiagnostic({
               event: event.name,
               attempt: attemptNumber,
               elapsedMs: Date.now() - startedAt
@@ -131,22 +151,25 @@ export async function generateResearchMemo(
           event.data.type === 'output_text_delta'
         ) {
           sawFirstTextDelta = true;
-          onDiagnostic?.({
+          publishDiagnostic({
             event: 'first_text_delta',
             attempt: attemptNumber,
             elapsedMs: Date.now() - startedAt
           });
         }
 
-        streamedMemoText = updateProgressFromStreamEvent(event, streamedMemoText, (stage) =>
-          progress.advance(stage)
+        streamedMemoText = updateProgressFromStreamEvent(
+          event,
+          streamedMemoText,
+          (stage) => progress.advance(stage),
+          (update) => activity.emit(update)
         );
       }
 
       await stream.completed;
 
       const finalMemo = streamedMemoText.trim();
-      onDiagnostic?.({
+      publishDiagnostic({
         event: 'stream_completed',
         attempt: attemptNumber,
         elapsedMs: Date.now() - startedAt,
@@ -155,7 +178,7 @@ export async function generateResearchMemo(
 
       if (stream.error) {
         if (isAbortError(stream.error)) {
-          onDiagnostic?.({
+          publishDiagnostic({
             event: 'attempt_timed_out',
             attempt: attemptNumber,
             elapsedMs: Date.now() - startedAt
@@ -171,7 +194,7 @@ export async function generateResearchMemo(
           }
 
           if (attempt < maxAttempts - 1) {
-            onDiagnostic?.({
+            publishDiagnostic({
               event: 'retrying_after_error',
               attempt: attemptNumber,
               elapsedMs: Date.now() - startedAt,
@@ -200,7 +223,7 @@ export async function generateResearchMemo(
       return finalMemo;
     } catch (error) {
       if (isAbortError(error)) {
-        onDiagnostic?.({
+        publishDiagnostic({
           event: 'attempt_timed_out',
           attempt: attempt + 1,
           elapsedMs: Date.now() - startedAt
@@ -222,7 +245,7 @@ export async function generateResearchMemo(
       }
 
       if (isRetryableModelError(error) && attempt < maxAttempts - 1) {
-        onDiagnostic?.({
+        publishDiagnostic({
           event: 'retrying_after_error',
           attempt: attempt + 1,
           elapsedMs: Date.now() - startedAt,
@@ -232,7 +255,7 @@ export async function generateResearchMemo(
       }
 
       if (isRetryableModelError(error)) {
-        onDiagnostic?.({
+        publishDiagnostic({
           event: 'attempt_failed',
           attempt: attempt + 1,
           elapsedMs: Date.now() - startedAt,
@@ -241,7 +264,7 @@ export async function generateResearchMemo(
         throw new ResearchGenerationError();
       }
 
-      onDiagnostic?.({
+      publishDiagnostic({
         event: 'attempt_failed',
         attempt: attempt + 1,
         elapsedMs: Date.now() - startedAt,
@@ -359,14 +382,44 @@ function createProgressEmitter(listener?: ResearchProgressListener) {
   };
 }
 
+function createActivityEmitter(listener?: ResearchActivityListener) {
+  let lastLabel = '';
+
+  return {
+    emit(update: ResearchActivityUpdate) {
+      if (!listener || !update.label || update.label === lastLabel) {
+        return;
+      }
+
+      lastLabel = update.label;
+      listener(update);
+    }
+  };
+}
+
 function updateProgressFromStreamEvent(
   event: RunStreamEvent,
   memoText: string,
-  advance: (stage: ResearchProgressStage) => void
+  advance: (stage: ResearchProgressStage) => void,
+  emitActivity: (update: ResearchActivityUpdate) => void
 ) {
   if (event.type === 'run_item_stream_event') {
-    if (event.name === 'tool_called' || event.name === 'tool_output') {
+    if (event.name === 'tool_called') {
       advance('searching');
+      const searchActivity = toSearchActivity(event);
+
+      if (searchActivity) {
+        emitActivity(searchActivity);
+      }
+    }
+
+    if (event.name === 'tool_output') {
+      advance('searching');
+      const sourceReviewActivity = toSourceReviewActivity(event);
+
+      if (sourceReviewActivity) {
+        emitActivity(sourceReviewActivity);
+      }
     }
   }
 
@@ -379,6 +432,10 @@ function updateProgressFromStreamEvent(
 
   if (nextMemoText.trim().length > 40) {
     advance('reviewing_eu');
+    emitActivity({
+      kind: 'evidence',
+      label: 'Checking retrieved evidence for EU residency signals'
+    });
   }
 
   if (
@@ -386,6 +443,10 @@ function updateProgressFromStreamEvent(
     normalized.includes('enterprise controls')
   ) {
     advance('reviewing_deployment');
+    emitActivity({
+      kind: 'evidence',
+      label: 'Checking retrieved evidence for enterprise deployment controls'
+    });
   }
 
   if (
@@ -393,9 +454,167 @@ function updateProgressFromStreamEvent(
     /\bverdict\b/.test(normalized)
   ) {
     advance('synthesizing');
+    emitActivity({
+      kind: 'synthesis',
+      label: 'Synthesizing the analyst verdict from the gathered evidence'
+    });
   }
 
   return nextMemoText;
+}
+
+function buildDomainSearchLabel(officialDomains: string[]) {
+  if (officialDomains.length === 0) {
+    return 'Searching official vendor documentation';
+  }
+
+  if (officialDomains.length === 1) {
+    return `Searching official documentation on ${officialDomains[0]}`;
+  }
+
+  return `Searching official documentation on ${officialDomains.join(', ')}`;
+}
+
+function toActivityFromDiagnosticEvent(
+  event: RetrievalDiagnosticEvent,
+  officialDomains: string[]
+) {
+  switch (event.event) {
+    case 'attempt_started':
+      return {
+        kind: 'search' as const,
+        label: `Running search pass ${event.attempt} across official vendor docs`
+      };
+    case 'first_stream_event':
+      return {
+        kind: 'search' as const,
+        label:
+          officialDomains.length > 0
+            ? `Waiting for source matches from ${officialDomains.join(', ')}`
+            : 'Waiting for usable vendor search results'
+      };
+    case 'retrying_after_error':
+      return {
+        kind: 'search' as const,
+        label: 'Retrying the vendor search because the previous pass did not return a usable answer'
+      };
+    case 'attempt_timed_out':
+      return {
+        kind: 'search' as const,
+        label: 'Vendor search timed out before it produced usable evidence'
+      };
+    case 'attempt_failed':
+      return {
+        kind: 'search' as const,
+        label: `Search pass ${event.attempt} ended without a usable answer`
+      };
+    default:
+      return null;
+  }
+}
+
+function toSearchActivity(event: Extract<RunStreamEvent, { type: 'run_item_stream_event' }>) {
+  const rawItem = event.item.rawItem;
+
+  if (!rawItem || rawItem.type !== 'hosted_tool_call') {
+    return {
+      kind: 'search' as const,
+      label: 'Searching official vendor documentation'
+    };
+  }
+
+  if (!/search/i.test(rawItem.name)) {
+    return null;
+  }
+
+  const query = extractSearchQuery(rawItem.arguments);
+
+  return {
+    kind: 'search' as const,
+    label: query ? `Searching vendor documentation for “${query}”` : 'Searching official vendor documentation'
+  };
+}
+
+function toSourceReviewActivity(event: Extract<RunStreamEvent, { type: 'run_item_stream_event' }>) {
+  const rawItem = event.item.rawItem;
+
+  if (!rawItem) {
+    return {
+      kind: 'source_review' as const,
+      label: 'Reviewing retrieved vendor evidence'
+    };
+  }
+
+  if (rawItem.type === 'hosted_tool_call') {
+    const sourceUrl = extractFirstUrl(rawItem.output);
+
+    if (sourceUrl) {
+      const hostname = safeHostname(sourceUrl);
+
+      return {
+        kind: 'source_review' as const,
+        label: hostname
+          ? `Reviewing retrieved source from ${hostname}`
+          : 'Reviewing a retrieved vendor source'
+      };
+    }
+  }
+
+  if (rawItem.type === 'function_call_result' && rawItem.output.type === 'text') {
+    const sourceUrl = extractFirstUrl(rawItem.output.text);
+
+    if (sourceUrl) {
+      const hostname = safeHostname(sourceUrl);
+
+      return {
+        kind: 'source_review' as const,
+        label: hostname
+          ? `Reviewing retrieved source from ${hostname}`
+          : 'Reviewing a retrieved vendor source'
+      };
+    }
+  }
+
+  return {
+    kind: 'source_review' as const,
+    label: 'Reviewing retrieved vendor evidence'
+  };
+}
+
+function extractSearchQuery(rawArguments: string | undefined) {
+  if (!rawArguments) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawArguments) as
+      | { query?: string; q?: string; search_query?: string }
+      | null;
+
+    const query = parsed?.query ?? parsed?.q ?? parsed?.search_query;
+
+    return typeof query === 'string' && query.trim() ? query.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractFirstUrl(rawText: string | undefined) {
+  if (!rawText) {
+    return null;
+  }
+
+  const match = rawText.match(/https?:\/\/[^\s)"'<>]+/i);
+
+  return match?.[0] ?? null;
+}
+
+function safeHostname(rawUrl: string) {
+  try {
+    return new URL(rawUrl).hostname;
+  } catch {
+    return null;
+  }
 }
 function isRetryableModelError(error: unknown) {
   return (
